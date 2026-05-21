@@ -3,7 +3,7 @@
     import { loadHFDataset } from '$lib/pyodide';
     import type { Experiment } from '$lib/types';
 
-    const FILE_SERVER = 'http://localhost:5102';
+    const FILE_SERVER = '';
 
     interface Props { onSelect?: (exp: Experiment) => void; }
     let { onSelect }: Props = $props();
