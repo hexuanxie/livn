@@ -2,7 +2,7 @@ import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig, type Plugin } from 'vite';
 import { copyPyodidePlugin } from './vite-plugin-pyodide';
 import { readFileSync, existsSync, openSync, readSync, closeSync, readdirSync, statSync } from 'node:fs';
-import { join, resolve, basename } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 
 // Serve graph.json (and other metadata) from systems/graphs/ for Pyodide

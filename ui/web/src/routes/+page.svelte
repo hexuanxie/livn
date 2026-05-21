@@ -16,50 +16,28 @@
     import { loadExpSystem, forceRefresh } from "$lib/pyodide";
     import type { BioRecording, Experiment } from "$lib/types";
 
-    // ── Navigation state (flat primitives avoid TS union-narrowing issues) ──
-    let navTab       = $state<'bio' | 'sim' | 'build'>('sim');
-    let navPage      = $state<'list' | 'detail' | 'exp-detail'>('detail');
+    let navTab       = $state<'system' | 'data' | 'build'>('system');
+    let navPage      = $state<'list' | 'detail' | 'exp-detail'>('list');
     let navSystem    = $state('EI1');
     let navRecording = $state<BioRecording | null>(null);
     let navExp       = $state<Experiment | null>(null);
 
-    let buildSubTab  = $state<'system' | 'stim'>('system');
+    const activeTab     = $derived(navTab);
+    const isSimDetail   = $derived(navPage === 'detail');
+    const currentSystem = $derived(isSimDetail ? navSystem : null);
 
-    const activeTab        = $derived(navTab);
-    const isSimDetail      = $derived(navTab === 'sim' && navPage === 'detail');
-    const currentSystem    = $derived(isSimDetail ? navSystem : null);
-    const currentRecording = $derived(navTab === 'bio' && navPage === 'detail' ? navRecording : null);
-
-    // Auto-load the default system once Pyodide is ready
-    let autoLoadDone = $state(false);
-    $effect(() => {
-        if ($pyodideReady && !autoLoadDone && isSimDetail) {
-            autoLoadDone = true;
-            pendingCommand.set(
-                `from livn.env import Env\nfrom livn.system import predefined\nenv = Env(predefined('${navSystem}'))`
-            );
-        }
-    });
-
-    function setTab(tab: 'bio' | 'sim' | 'build') {
+    function setTab(tab: 'system' | 'data' | 'build') {
         if (tab === navTab) return;
         navTab  = tab;
         navPage = 'list';
     }
 
     function selectSystem(system: string) {
-        navTab    = 'sim';
         navPage   = 'detail';
         navSystem = system;
         pendingCommand.set(
             `from livn.env import Env\nfrom livn.system import predefined\nenv = Env(predefined('${system}'))`
         );
-    }
-
-    function selectRecording(recording: BioRecording) {
-        navTab       = 'bio';
-        navPage      = 'detail';
-        navRecording = recording;
     }
 
     async function selectExperiment(exp: Experiment) {
@@ -106,7 +84,7 @@
         viewConfig.update((vc) => ({ ...vc, showElectrodes: !vc.showElectrodes }));
     }
 
-    // ── Info panels (Sim detail) ──────────────────────────────────────────
+    // ── Info panels (sim detail) ──────────────────────────────────────────
     let setupOpen      = $state(false);
     let neuronInfoOpen = $state(false);
 
@@ -150,15 +128,15 @@
     <NavBar {activeTab} onTabChange={setTab} />
 
     <div class="content">
+
         {#if isSimDetail}
+            <!-- Sim detail: full screen (3D left, console right) -->
             <div class="sim-detail">
-                <!-- 3D scene panel -->
                 <div class="scene-panel">
                     <Canvas><EnvScene /></Canvas>
                     <Tooltip />
 
                     {#if system}
-                        <!-- Viz controls — top-left -->
                         <div class="controls">
                             <div class="control-group">
                                 <span class="control-label">Populations</span>
@@ -198,9 +176,7 @@
                         </div>
                     {/if}
 
-                    <!-- Info panels — top-right -->
                     <div class="info-overlay">
-                        <!-- Setup -->
                         <div class="info-section">
                             <button class="info-hdr" onclick={() => (setupOpen = !setupOpen)}>
                                 Setup <span class="chevron" class:open={setupOpen}>▶</span>
@@ -216,8 +192,6 @@
                                 </div>
                             {/if}
                         </div>
-
-                        <!-- Neuron Info -->
                         <div class="info-section">
                             <button class="info-hdr" onclick={() => (neuronInfoOpen = !neuronInfoOpen)}>
                                 Neuron Info <span class="chevron" class:open={neuronInfoOpen}>▶</span>
@@ -249,15 +223,12 @@
                                 </div>
                             {/if}
                         </div>
-
                     </div>
                 </div>
-
-                <!-- Console panel -->
                 <div class="console-panel">
                     <div class="console-header">
                         <span class="console-system">{currentSystem ?? '—'}</span>
-                        <button class="list-btn" onclick={() => { navTab = 'sim'; navPage = 'list'; }}>
+                        <button class="list-btn" onclick={() => { navPage = 'list'; }}>
                             ← Systems
                         </button>
                     </div>
@@ -265,22 +236,15 @@
                 </div>
             </div>
 
-        {:else if navTab === 'sim' && navPage === 'list'}
-            <div class="sim-list-layout">
-                <div class="sim-list-panel sim-list-divider">
-                    <SimSystemList onSelect={selectSystem} />
-                </div>
-                <div class="sim-list-panel">
-                    <ExperimentList onSelect={selectExperiment} />
-                </div>
-            </div>
+        {:else if navTab === 'system'}
+            <SimSystemList onSelect={selectSystem} />
 
-        {:else if navTab === 'sim' && navPage === 'exp-detail' && navExp}
-            <div class="exp-detail-layout">
-                <div class="scene-panel">
+        {:else if navTab === 'data' && navPage === 'exp-detail' && navExp}
+            <!-- Experiment detail: 3D system left, experiment data right -->
+            <div class="split-layout">
+                <div class="split-panel">
                     <Canvas><EnvScene /></Canvas>
                     <Tooltip />
-
                     {#if system}
                         <div class="controls">
                             <div class="control-group">
@@ -308,10 +272,20 @@
                                         value={config.opacity} oninput={setOpacity} />
                                 </label>
                             </div>
+                            <div class="control-group">
+                                <label class="toggle">
+                                    <input type="checkbox" checked={config.showBoundingBox} onchange={toggleBBox} />
+                                    Bounding box
+                                </label>
+                                <label class="toggle">
+                                    <input type="checkbox" checked={config.showElectrodes} onchange={toggleElectrodes} />
+                                    Electrodes
+                                </label>
+                            </div>
                         </div>
                     {/if}
                 </div>
-                <div class="data-panel">
+                <div class="split-panel split-divider">
                     <ExperimentDataPanel
                         experiment={navExp}
                         onBack={() => {
@@ -324,40 +298,30 @@
                 </div>
             </div>
 
-        {:else if navTab === 'bio' && navPage === 'list'}
-            <BioRecordingList onSelect={selectRecording} />
-
-        {:else if navTab === 'bio' && navPage === 'detail' && currentRecording}
+        {:else if navTab === 'data' && navRecording}
+            <!-- Bio recording detail: full screen -->
             <BioRecordingDetail
-                recording={currentRecording}
-                onBack={() => { navTab = 'bio'; navPage = 'list'; }}
+                recording={navRecording}
+                onBack={() => { navRecording = null; }}
             />
 
-        {:else if navTab === 'build'}
-            <!-- TODO: Build tab -->
-            <div class="build-page">
-                <div class="build-tabs">
-                    <button
-                        class="build-tab"
-                        class:active={buildSubTab === 'system'}
-                        onclick={() => (buildSubTab = 'system')}
-                    >Build your own system</button>
-                    <button
-                        class="build-tab"
-                        class:active={buildSubTab === 'stim'}
-                        onclick={() => (buildSubTab = 'stim')}
-                    >Build your own stimulation pipeline</button>
+        {:else if navTab === 'data'}
+            <!-- Data tab: bio left, experiments right -->
+            <div class="split-layout">
+                <div class="split-panel">
+                    <BioRecordingList onSelect={(r) => { navRecording = r; }} />
                 </div>
-                <div class="build-body">
-                    {#if buildSubTab === 'system'}
-                        <SystemGenerator />
-                    {:else}
-                        <!-- TODO: build your own stimulation pipeline -->
-                        <div class="todo-placeholder">Coming soon</div>
-                    {/if}
+                <div class="split-panel split-divider">
+                    <ExperimentList onSelect={selectExperiment} />
                 </div>
             </div>
+
+        {:else if navTab === 'build'}
+            <div class="build-body">
+                <SystemGenerator />
+            </div>
         {/if}
+
     </div>
 
     <div class="footer"><StatusBar /></div>
@@ -372,7 +336,6 @@
         overflow: hidden;
     }
 
-    /* Content area fills the middle row */
     .content {
         min-height: 0;
         overflow: hidden;
@@ -380,12 +343,44 @@
         flex-direction: column;
     }
 
-    /* Footer spans full width in the last row */
     .footer {
         grid-column: 1 / -1;
     }
 
-    /* ── Sim detail: 2-column split ── */
+    /* ── Split layout: left = bio, right = sim ── */
+    .split-layout {
+        flex: 1;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    .split-panel {
+        position: relative;
+        min-height: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .split-divider {
+        border-left: 1px solid #2a2a4a;
+    }
+
+    /* Empty bio panel placeholder */
+    .empty-panel {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #444;
+        font-size: 13px;
+        font-style: italic;
+        background: #0d0d1a;
+    }
+
+    /* ── Sim detail: full-screen two-column (3D left, console right) ── */
     .sim-detail {
         flex: 1;
         display: grid;
@@ -394,6 +389,11 @@
         overflow: hidden;
     }
 
+    .sim-detail .console-panel {
+        border-left: 1px solid #333;
+    }
+
+    /* ── Scene panel ── */
     .scene-panel {
         position: relative;
         min-height: 0;
@@ -401,7 +401,6 @@
     }
 
     .console-panel {
-        border-left: 1px solid #333;
         background: #1a1a2e;
         display: flex;
         flex-direction: column;
@@ -524,93 +523,29 @@
     .neuron-table tr:last-child td { border-bottom: none; }
 
     /* ── Build tab ── */
-    .build-page {
-        display: flex;
-        flex-direction: column;
-        height: 100%;
-        background: #0d0d1a;
-    }
-    .build-tabs {
-        display: flex;
-        gap: 2px;
-        padding: 12px 24px 0;
-        border-bottom: 1px solid #2a2a4a;
-        flex-shrink: 0;
-    }
-    .build-tab {
-        background: none;
-        border: none;
-        border-bottom: 2px solid transparent;
-        color: #666;
-        font-size: 13px;
-        font-weight: 600;
-        padding: 6px 16px 10px;
-        cursor: pointer;
-        transition: color 0.15s, border-color 0.15s;
-        font-family: inherit;
-    }
-    .build-tab:hover { color: #bbb; }
-    .build-tab.active { color: #4fc3f7; border-bottom-color: #4fc3f7; }
     .build-body {
-        flex: 1; 
+        flex: 1;
         display: flex;
         min-height: 0;
         overflow: hidden;
     }
-    .build-body > :global(*) {   
+    .build-body > :global(*) {
         flex: 1;
         min-width: 0;
         min-height: 0;
     }
-    .todo-placeholder {
-        color: #444;
-        font-size: 14px;
-        font-style: italic;
-        margin: auto;
-    }
-
-    /* ── Exp detail: 3D left + data right ── */
-    .exp-detail-layout {
-        flex: 1;
-        display: grid;
-        grid-template-columns: 2fr 1fr;
-        min-height: 0;
-        overflow: hidden;
-    }
-
-    .data-panel {
-        border-left: 1px solid #333;
-        background: #1a1a2e;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        overflow: hidden;
-    }
-
-    /* ── Sim list: two-panel split ── */
-    .sim-list-layout {
-        flex: 1;
-        display: grid;
-        grid-template-columns: 1fr 1.6fr;
-        min-height: 0;
-        overflow: hidden;
-    }
-    .sim-list-panel {
-        min-height: 0;
-        overflow-y: auto;
-    }
-    .sim-list-divider {
-        border-right: 1px solid #2a2a4a;
-    }
 
     /* ── Responsive ── */
     @media (max-width: 900px) {
-        .sim-detail {
+        .split-layout {
             grid-template-columns: 1fr;
-            grid-template-rows: 1fr 280px;
+            grid-template-rows: 1fr 1fr;
         }
-        .console-panel {
+        .split-divider {
             border-left: none;
+            border-top: 1px solid #2a2a4a;
+        }
+        .data-sim-detail .console-panel {
             border-top: 1px solid #333;
         }
     }

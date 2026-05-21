@@ -4,18 +4,25 @@ import { pyodideReady, hsdsConnected, backendInfo, loading, lastError, lastExecT
 
 let pyodide: PyodideInterface | null = null;
 let idbfsMounted = false;
+let initPromise: Promise<void> | null = null;
 
 function logSnap(msg: string) {
     const ts = new Date().toLocaleTimeString();
     snapshotLog.update((log) => [...log.slice(-19), `[${ts}] ${msg}`]);
 }
 
-export async function initPyodide(onLog: (msg: string) => void): Promise<void> {
+export function initPyodide(onLog: (msg: string) => void): Promise<void> {
     if (pyodide) {
         onLog('Pyodide already loaded');
         pyodideReady.set(true);
-        return;
+        return Promise.resolve();
     }
+    if (initPromise) return initPromise;
+    initPromise = _initPyodide(onLog).catch(e => { initPromise = null; throw e; });
+    return initPromise;
+}
+
+async function _initPyodide(onLog: (msg: string) => void): Promise<void> {
 
     onLog('Loading Pyodide runtime…');
 
@@ -221,7 +228,8 @@ export async function loadHFDataset(
     expPath: string,
     serverBase: string
 ): Promise<void> {
-    if (!pyodide) throw new Error('Pyodide not initialized');
+    await initPyodide(() => {});
+    const py = pyodide!;
 
     // 1. Fetch manifest (size-checked by server)
     const manifestUrl = `${serverBase}/dataset_manifest?path=${encodeURIComponent(expPath)}`;
@@ -234,21 +242,21 @@ export async function loadHFDataset(
 
     // 2. Write dataset files to Pyodide FS
     const fsDir = `/datasets/${name}`;
-    try { pyodide.FS.mkdir('/datasets'); } catch { /* exists */ }
-    try { pyodide.FS.mkdir(fsDir); } catch { /* exists */ }
+    try { py.FS.mkdir('/datasets'); } catch { /* exists */ }
+    try { py.FS.mkdir(fsDir); } catch { /* exists */ }
 
     for (const file of files) {
         const fileUrl = `${serverBase}/dataset_file?path=${encodeURIComponent(expPath)}&file=${encodeURIComponent(file)}`;
         const bytes = new Uint8Array(await (await fetch(fileUrl)).arrayBuffer());
-        pyodide.FS.writeFile(`${fsDir}/${file}`, bytes);
+        py.FS.writeFile(`${fsDir}/${file}`, bytes);
     }
 
     // 3. Ensure pyarrow and xxhash prebuilt packages are loaded
-    await pyodide.loadPackage(['pyarrow', 'xxhash', 'lzma']);
+    await py.loadPackage(['pyarrow', 'xxhash', 'lzma']);
 
     // 4. Install datasets if not already done (lazy, first-use only)
     if (!datasetsInstalled) {
-        await pyodide.runPythonAsync(`
+        await py.runPythonAsync(`
 import micropip
 await micropip.install('datasets')
 `);
@@ -256,7 +264,7 @@ await micropip.install('datasets')
     }
 
     // 5. Load from disk — patch out ThreadPoolExecutor first (Pyodide has no threads)
-    await pyodide.runPythonAsync(`
+    await py.runPythonAsync(`
 import tqdm.contrib.concurrent as _tcc
 _tcc.thread_map = lambda fn, *iters, **kw: list(map(fn, *iters))
 

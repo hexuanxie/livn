@@ -8,6 +8,24 @@
     interface Props { onSelect?: (exp: Experiment) => void; }
     let { onSelect }: Props = $props();
 
+    // Built-in experiments always shown regardless of server state
+    const BUILTIN_EXPERIMENTS: Experiment[] = [
+        {
+            name: 'EI1_spikes',
+            root: 'built-in',
+            path: '/Users/hexuan/Work/livn/livn_experiments/EI1_spikes',
+            created_at: null,
+            n_shards: 3,
+            metadata: {
+                duration: 1000,
+                system: { uri: './systems/graphs/EI1', populations: ['EXC', 'INH'], n_neurons: 10 },
+                model: 'ReducedCalciumSomaDendrite',
+                recording: { spikes: true, voltages: false, membrane_currents: true },
+            },
+        },
+    ];
+    const BUILTIN_NAMES = new Set(BUILTIN_EXPERIMENTS.map(e => e.name));
+
     let experiments  = $state<Experiment[]>([]);
     let fetching     = $state(true);
     let fetchError   = $state<string | null>(null);
@@ -21,10 +39,11 @@
             .catch(e  => { fetchError = e.message; fetching = false; });
     });
 
-    // Group by root, preserving insertion order
+    // Group by root, excluding built-ins (shown separately)
     const byRoot = $derived.by(() => {
         const map = new Map<string, Experiment[]>();
         for (const exp of experiments) {
+            if (BUILTIN_NAMES.has(exp.name)) continue;
             const list = map.get(exp.root) ?? [];
             list.push(exp);
             map.set(exp.root, list);
@@ -94,15 +113,62 @@
 </script>
 
 <div class="exp-list">
-    <h2>Experiments</h2>
+    <h2>Simulation Experiments</h2>
 
+    <!-- Built-in experiments -->
+    <div class="root-group">
+        <div class="root-header">
+            <span class="root-name builtin-label">built-in</span>
+        </div>
+        <div class="grid">
+            {#each BUILTIN_EXPERIMENTS as exp (exp.name)}
+                <div
+                    class="card builtin"
+                    class:loading={loadingPath === exp.path}
+                    role="button"
+                    tabindex="0"
+                    onclick={() => selectExperiment(exp)}
+                    onkeydown={(e) => e.key === 'Enter' && selectExperiment(exp)}
+                >
+                    <div class="card-name-row">
+                        <span class="card-name">{exp.name}</span>
+                        <span class="builtin-badge">built-in</span>
+                    </div>
+
+                    <div class="card-rows">
+                        <div class="row">
+                            <span class="row-label">System</span>
+                            <span class="row-val">{systemLabel(exp.metadata)}</span>
+                        </div>
+                        {#if neuronCount(exp.metadata)}
+                            <div class="row">
+                                <span class="row-label">Neurons</span>
+                                <span class="row-val">{neuronCount(exp.metadata)}</span>
+                            </div>
+                        {/if}
+                        <div class="row">
+                            <span class="row-label">Model</span>
+                            <span class="row-val">{modelLabel(exp.metadata)}</span>
+                        </div>
+                    </div>
+
+                    <div class="card-footer">
+                        <span class="tag">{exp.n_shards} {exp.n_shards === 1 ? 'shard' : 'shards'}</span>
+                    </div>
+                    {#if cardErrors[exp.path]}
+                        <div class="card-error">{cardErrors[exp.path]}</div>
+                    {/if}
+                </div>
+            {/each}
+        </div>
+    </div>
+
+    <!-- Server-fetched experiments -->
     {#if fetching}
         <div class="state-msg">Loading…</div>
     {:else if fetchError}
         <div class="state-msg error">Could not reach server: {fetchError}</div>
-    {:else if byRoot.size === 0}
-        <div class="state-msg muted">No experiments found. Run an ArrowDataset to create one.</div>
-    {:else}
+    {:else if byRoot.size > 0}
         {#each byRoot.entries() as [root, exps] (root)}
             <div class="root-group">
                 <div class="root-header">
@@ -231,8 +297,32 @@
         border-color: #66bb6a;
         background: #162216;
     }
+    .card.builtin         { border-color: #2a4a2a; }
+    .card.builtin:hover   { border-color: #66bb6a; background: #162216; }
     .card.loading { opacity: 0.55; pointer-events: none; }
     .card-error   { font-size: 10px; color: #ef5350; margin-top: 4px; }
+
+    .card-name-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 8px;
+    }
+    .builtin-badge {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        background: #1a3a1a;
+        border: 1px solid #66bb6a;
+        color: #66bb6a;
+        border-radius: 3px;
+        padding: 2px 6px;
+        flex-shrink: 0;
+        margin-top: 3px;
+        white-space: nowrap;
+    }
+    .builtin-label { color: #66bb6a; }
 
     .card-name {
         font-size: 18px;
