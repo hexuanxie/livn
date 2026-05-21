@@ -58,6 +58,18 @@ export type ExpMeta = {
     recording?: { spikes?: boolean; voltages?: boolean; membrane_currents?: boolean };
 };
 
+export interface BioRecording {
+    id: string;
+    name: string;
+    date: string;
+    dur: string;
+    durS: number;
+    channels: number;
+    kind: 'builtin' | 'user';
+    apiPath: string;
+    protocol: string;
+}
+
 export type Experiment = {
     name: string;
     root: string;

@@ -11,15 +11,16 @@
     import ExperimentDataPanel from "$lib/components/ExperimentDataPanel.svelte";
     import BioRecordingList from "$lib/components/BioRecordingList.svelte";
     import BioRecordingDetail from "$lib/components/BioRecordingDetail.svelte";
+    import SystemGenerator from "$lib/components/SystemGenerator.svelte";
     import { viewConfig, envSystem, pendingCommand, pyodideReady, activeExperiment, selectedNeurons, activeExpRow, selectedElectrode } from "$lib/stores";
     import { loadExpSystem, forceRefresh } from "$lib/pyodide";
-    import type { Experiment } from "$lib/types";
+    import type { BioRecording, Experiment } from "$lib/types";
 
     // ── Navigation state (flat primitives avoid TS union-narrowing issues) ──
     let navTab       = $state<'bio' | 'sim' | 'build'>('sim');
     let navPage      = $state<'list' | 'detail' | 'exp-detail'>('detail');
     let navSystem    = $state('EI1');
-    let navRecording = $state('');
+    let navRecording = $state<BioRecording | null>(null);
     let navExp       = $state<Experiment | null>(null);
 
     let buildSubTab  = $state<'system' | 'stim'>('system');
@@ -55,7 +56,7 @@
         );
     }
 
-    function selectRecording(recording: string) {
+    function selectRecording(recording: BioRecording) {
         navTab       = 'bio';
         navPage      = 'detail';
         navRecording = recording;
@@ -328,7 +329,7 @@
 
         {:else if navTab === 'bio' && navPage === 'detail' && currentRecording}
             <BioRecordingDetail
-                recordingId={currentRecording}
+                recording={currentRecording}
                 onBack={() => { navTab = 'bio'; navPage = 'list'; }}
             />
 
