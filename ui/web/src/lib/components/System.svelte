@@ -15,7 +15,7 @@
         type Intersection,
     } from "three";
     import type { SystemData, ViewConfig } from "$lib/types";
-    import { tooltip, viewConfig, envIO, selectedNeurons, activeExperiment } from "$lib/stores";
+    import { tooltip, viewConfig, envIO, selectedNeurons, activeRecording, envRightTab } from "$lib/stores";
     import { onMount, onDestroy } from "svelte";
 
     interface Props {
@@ -223,11 +223,13 @@
                     nearestElectrode,
                 });
 
-                // Toggle multi-select when in experiment mode
-                if ($activeExperiment !== null) {
-                    selectedNeurons.update(ns =>
-                        ns.includes(gid) ? ns.filter(n => n !== gid) : [...ns, gid]
-                    );
+                if ($activeRecording !== null) {
+                    envRightTab.set('recording');
+                    if ($activeRecording.kind === 'experiment') {
+                        selectedNeurons.update(ns =>
+                            ns.includes(gid) ? ns.filter(n => n !== gid) : [...ns, gid]
+                        );
+                    }
                 }
                 return;
             }

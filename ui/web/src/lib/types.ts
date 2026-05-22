@@ -80,3 +80,14 @@ export type Experiment = {
     /** Built-ins are generated in-browser; server experiments load from disk via the file server. */
     kind?: 'builtin' | 'server';
 };
+
+export interface EnvPreset {
+    id: string;
+    name: string;
+    description: string;
+    load: { kind: 'builtin-culture' } | { kind: 'command'; code: string };
+}
+
+export type ActiveRecording =
+    | { kind: 'experiment'; experiment: Experiment }
+    | { kind: 'bio'; recording: BioRecording };

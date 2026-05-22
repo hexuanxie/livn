@@ -1,10 +1,17 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
 
-    let { rec, totalDuration, totalChannels }: {
-        rec: string;          // path relative to bio_data (e.g. 'kimia/recording1')
+    let {
+        rec,
+        totalDuration,
+        totalChannels,
+        focusedChannel = null,
+    }: {
+        rec: string;
         totalDuration: number;
         totalChannels: number;
+        /** Electrode / channel index from 3D selection (0-based). */
+        focusedChannel?: number | null;
     } = $props();
 
     const VISIBLE_CH = 32;
@@ -24,6 +31,19 @@
     let effHz     = 0;
 
     let ro: ResizeObserver | undefined;
+
+    $effect(() => {
+        if (focusedChannel == null) return;
+        const ch = Math.min(Math.max(0, focusedChannel), Math.max(0, totalChannels - 1));
+        const nextOffset = Math.min(
+            Math.max(0, ch - Math.floor(VISIBLE_CH / 2)),
+            Math.max(0, totalChannels - VISIBLE_CH)
+        );
+        if (nextOffset !== chOffset) {
+            chOffset = nextOffset;
+            void load();
+        }
+    });
 
     onMount(async () => {
         await load();

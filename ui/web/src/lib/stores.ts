@@ -1,5 +1,8 @@
 import { writable } from 'svelte/store';
-import type { SystemData, IOData, ModelData, DecodingData, ViewConfig, TooltipData, EnvSnapshot, Experiment } from './types';
+import type {
+    SystemData, IOData, ModelData, DecodingData, ViewConfig, TooltipData, EnvSnapshot,
+    Experiment, ActiveRecording,
+} from './types';
 
 export const pyodideReady = writable(false);
 export const hsdsConnected = writable(false);
@@ -44,6 +47,17 @@ export const selectedNeurons  = writable<number[]>([]);
 export const activeExperiment = writable<Experiment | null>(null);
 export const activeExpRow     = writable<number>(0);
 export const selectedElectrode = writable<number | null>(null);
+
+export const activeRecording = writable<ActiveRecording | null>(null);
+export const envRightTab = writable<'console' | 'recording'>('console');
+
+export function clearActiveRecording(): void {
+    activeRecording.set(null);
+    activeExperiment.set(null);
+    selectedNeurons.set([]);
+    selectedElectrode.set(null);
+    activeExpRow.set(0);
+}
 function logSnapshot(msg: string) {
     const ts = new Date().toLocaleTimeString();
     snapshotLog.update((log) => [...log.slice(-19), `[${ts}] ${msg}`]);

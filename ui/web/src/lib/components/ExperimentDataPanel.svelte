@@ -7,9 +7,15 @@
 
     interface Props {
         experiment: Experiment;
-        onBack: () => void;
+        onBack?: () => void;
+        onChangeRecording?: () => void;
     }
-    let { experiment, onBack }: Props = $props();
+    let { experiment, onBack, onChangeRecording }: Props = $props();
+
+    function leaveRecording() {
+        if (onChangeRecording) onChangeRecording();
+        else onBack?.();
+    }
 
     let rowData    = $state<RowData | null>(null);
     let loadError  = $state<string | null>(null);
@@ -560,7 +566,9 @@
 <div class="panel">
     <!-- Header -->
     <div class="panel-header">
-        <button class="back-btn" onclick={onBack}>← Back</button>
+        <button class="back-btn" onclick={leaveRecording}>
+            {onChangeRecording ? '↩ Change recording' : '← Back'}
+        </button>
         <span class="exp-name">{experiment.name}</span>
         <div class="exp-meta">
             <span class="meta-tag">system: {systemLabel()}</span>

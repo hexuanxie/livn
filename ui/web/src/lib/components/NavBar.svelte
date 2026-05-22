@@ -1,15 +1,14 @@
 <script lang="ts">
     let { activeTab, onTabChange }: {
-        activeTab: 'system' | 'data' | 'build';
-        onTabChange: (tab: 'system' | 'data' | 'build') => void;
+        activeTab: 'env' | 'build';
+        onTabChange: (tab: 'env' | 'build') => void;
     } = $props();
 </script>
 
 <nav class="nav-bar">
     <div class="brand">livn</div>
-    <button class="tab" class:active={activeTab === 'system'} onclick={() => onTabChange('system')}>System</button>
-    <button class="tab" class:active={activeTab === 'data'} onclick={() => onTabChange('data')}>Data</button>
-    <button class="tab" class:active={activeTab === 'build'} onclick={() => onTabChange('build')}>Build</button>
+    <button class="tab" class:active={activeTab === 'env'} onclick={() => onTabChange('env')}>Viewer</button>
+    <button class="tab" class:active={activeTab === 'build'} onclick={() => onTabChange('build')}>Designer</button>
 </nav>
 
 <style>

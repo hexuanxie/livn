@@ -15,7 +15,7 @@
         type Intersection,
     } from "three";
     import type { IOData } from "$lib/types";
-    import { viewConfig, envSystem, activeExperiment, selectedElectrode } from "$lib/stores";
+    import { viewConfig, envSystem, activeRecording, selectedElectrode, envRightTab } from "$lib/stores";
     import { onMount, onDestroy } from "svelte";
 
     interface Props {
@@ -129,7 +129,7 @@
     }
 
     function onPointerUp(e: PointerEvent) {
-        if ($activeExperiment === null) return;
+        if ($activeRecording === null) return;
 
         const canvas = renderer.domElement;
         const rect = canvas.getBoundingClientRect();
@@ -152,6 +152,7 @@
         const hits: Intersection[] = raycaster.intersectObjects(electrodeMeshes);
         if (hits.length > 0) {
             const eid = hits[0].object.userData.electrodeId as number;
+            envRightTab.set('recording');
             selectedElectrode.update(cur => cur === eid ? null : eid);
         }
     }

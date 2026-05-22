@@ -1,7 +1,7 @@
 <script lang="ts">
     import type { BioRecording } from '$lib/types';
 
-    let { onSelect }: { onSelect: (rec: BioRecording) => void } = $props();
+    let { onSelect, compact = false }: { onSelect: (rec: BioRecording) => void; compact?: boolean } = $props();
 
     const BUILTIN: BioRecording[] = [
         {
@@ -87,9 +87,9 @@
     }
 </script>
 
-<div class="list">
+<div class="list" class:compact>
     <div class="list-header">
-        <h2>Biological Recordings</h2>
+        {#if !compact}<h2>Biological Recordings</h2>{:else}<span class="section-title">Bio recordings</span>{/if}
         <button class="add-btn" onclick={() => (formOpen = !formOpen)}>
             {formOpen ? '✕ Cancel' : '+ Add Recording'}
         </button>
@@ -174,6 +174,8 @@
 
 <style>
     .list { padding: 32px; overflow-y: auto; height: 100%; box-sizing: border-box; }
+    .list.compact { padding: 12px 16px; height: auto; max-height: 40vh; }
+    .section-title { font-size: 13px; font-weight: 700; color: #66bb6a; }
 
     .list-header {
         display: flex;

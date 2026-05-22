@@ -5,8 +5,11 @@
 
     const FILE_SERVER = '';
 
-    interface Props { onSelect?: (exp: Experiment) => void; }
-    let { onSelect }: Props = $props();
+    interface Props {
+        onSelect?: (exp: Experiment) => void;
+        compact?: boolean;
+    }
+    let { onSelect, compact = false }: Props = $props();
 
     // Built-in experiments: synthetic data in Pyodide (no file server), like demo/neural1
     const BUILTIN_EXPERIMENTS: Experiment[] = [
@@ -118,8 +121,8 @@
     }
 </script>
 
-<div class="exp-list">
-    <h2>Simulation Experiments</h2>
+<div class="exp-list" class:compact>
+    {#if !compact}<h2>Simulation Experiments</h2>{/if}
 
     <!-- Built-in experiments -->
     <div class="root-group">
@@ -237,6 +240,11 @@
         overflow-y: auto;
         height: 100%;
         box-sizing: border-box;
+    }
+    .exp-list.compact {
+        padding: 12px 16px;
+        height: auto;
+        max-height: 45vh;
     }
 
     h2 {
