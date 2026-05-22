@@ -225,7 +225,7 @@
 
                 if ($activeRecording !== null) {
                     envRightTab.set('recording');
-                    if ($activeRecording.kind === 'experiment') {
+                    if ($activeRecording.capabilities.spikes) {
                         selectedNeurons.update(ns =>
                             ns.includes(gid) ? ns.filter(n => n !== gid) : [...ns, gid]
                         );

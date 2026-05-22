@@ -1,21 +1,53 @@
 <script lang="ts">
     import { onDestroy } from 'svelte';
-    import { selectedNeurons, activeExpRow, envSystem, selectedElectrode } from '$lib/stores';
-    import { getExpRowData, getElectrodeData, exportChartPng, getAllRowSpikes, type RowData, type ElectrodeData } from '$lib/pyodide';
-    import type { Experiment, SystemData } from '$lib/types';
+    import {
+        selectedNeurons,
+        activeTrialIndex,
+        envSystem,
+        selectedElectrode,
+        recordingViewMode,
+    } from '$lib/stores';
+    import {
+        getTrialNeuronData,
+        getTrialElectrodeData,
+        exportChartPng,
+        getAllRowSpikes,
+        type RowData,
+        type ElectrodeData,
+    } from '$lib/pyodide';
+    import { capabilityLabels } from '$lib/recordingCatalog';
+    import type { Recording, RecordingViewMode, SystemData } from '$lib/types';
     import ChartModal from './ChartModal.svelte';
+    import SignalViewer from './SignalViewer.svelte';
 
     interface Props {
-        experiment: Experiment;
-        onBack?: () => void;
+        recording: Recording;
         onChangeRecording?: () => void;
     }
-    let { experiment, onBack, onChangeRecording }: Props = $props();
+    let { recording, onChangeRecording }: Props = $props();
+
+    const experiment = $derived(recording.experiment);
+    const caps = $derived(recording.capabilities);
+    const capChips = $derived(capabilityLabels(caps));
 
     function leaveRecording() {
-        if (onChangeRecording) onChangeRecording();
-        else onBack?.();
+        onChangeRecording?.();
     }
+
+    function setViewMode(mode: RecordingViewMode) {
+        if (mode === 'spikes' && !caps.spikes) return;
+        if (mode === 'neuron_voltage' && !caps.neuronVoltages) return;
+        if (mode === 'channel_lfp' && !caps.channelLfp) return;
+        recordingViewMode.set(mode);
+    }
+
+    const showChannelOverview = $derived(
+        $recordingViewMode === 'channel_lfp'
+            && caps.channelLfp
+            && recording.source === 'acquired'
+            && recording.bio
+            && $selectedElectrode === null
+    );
 
     let rowData    = $state<RowData | null>(null);
     let loadError  = $state<string | null>(null);
@@ -41,8 +73,8 @@
     let electrodeLoading = $state(false);
     let electrodeError   = $state<string | null>(null);
 
-    const noSystemMetadata = $derived(!experiment.metadata?.system?.uri);
-    const duration = $derived(rowData?.duration ?? 1000);
+    const noSystemMetadata = $derived(!experiment?.metadata?.system?.uri);
+    const duration = $derived(rowData?.duration ?? recording.durationMs);
 
     // ── Playback ───────────────────────────────────────────────────────────
     let animId: number | null = null;
@@ -85,7 +117,7 @@
     });
 
     $effect(() => {
-        void $activeExpRow;
+        void $activeTrialIndex;
         stopPlay();
         timeCursor = 0;
     });
@@ -94,7 +126,7 @@
     async function fetchRowData() {
         if ($selectedNeurons.length === 0) { rowData = null; return; }
         try {
-            rowData = await getExpRowData($activeExpRow, $selectedNeurons);
+            rowData = await getTrialNeuronData($activeTrialIndex, $selectedNeurons);
             loadError = null;
         } catch (e) {
             loadError = (e as Error).message;
@@ -102,15 +134,15 @@
     }
 
     $effect(() => {
-        void $activeExpRow;
+        void $activeTrialIndex;
         void $selectedNeurons.length;
         fetchRowData();
     });
 
     // ── All-spikes for raster ──────────────────────────────────────────────
     $effect(() => {
-        const row = $activeExpRow;
-        if (rasterAllNeurons) {
+        const row = $activeTrialIndex;
+        if (rasterAllNeurons && caps.spikes && recording.source === 'simulated') {
             allSpikesLoading = true;
             getAllRowSpikes(row)
                 .then(d => { allSpikes = d; })
@@ -123,12 +155,13 @@
 
     // ── Electrode data ─────────────────────────────────────────────────────
     $effect(() => {
-        const row = $activeExpRow;
+        const row = $activeTrialIndex;
         const id  = $selectedElectrode;
-        if (id !== null) {
+        const cursor = timeCursor;
+        if (id !== null && $recordingViewMode === 'channel_lfp' && caps.channelLfp) {
             electrodeLoading = true;
             electrodeError   = null;
-            getElectrodeData(row, id)
+            getTrialElectrodeData(row, id, cursor)
                 .then(d => { electrodeData = d; })
                 .catch(e => { electrodeError = (e as Error).message; electrodeData = null; })
                 .finally(() => { electrodeLoading = false; });
@@ -140,10 +173,10 @@
 
     // ── Helpers ────────────────────────────────────────────────────────────
     function systemLabel() {
-        const uri = experiment.metadata?.system?.uri;
+        const uri = experiment?.metadata?.system?.uri;
         return uri ? (uri.split('/').pop() ?? uri) : '—';
     }
-    function modelLabel() { return experiment.metadata?.model ?? '—'; }
+    function modelLabel() { return experiment?.metadata?.model ?? '—'; }
 
     function deselectNeuron(gid: number) {
         selectedNeurons.update(ns => ns.filter(n => n !== gid));
@@ -566,14 +599,20 @@
 <div class="panel">
     <!-- Header -->
     <div class="panel-header">
-        <button class="back-btn" onclick={leaveRecording}>
-            {onChangeRecording ? '↩ Change recording' : '← Back'}
-        </button>
-        <span class="exp-name">{experiment.name}</span>
-        <div class="exp-meta">
-            <span class="meta-tag">system: {systemLabel()}</span>
-            <span class="meta-tag">model: {modelLabel()}</span>
-        </div>
+        <button class="back-btn" onclick={leaveRecording}>↩ Change recording</button>
+        <span class="exp-name">{recording.name}</span>
+        <span class="source-tag" class:sim={recording.source === 'simulated'} class:acq={recording.source === 'acquired'}>
+            {recording.source}
+        </span>
+        {#each capChips as chip}
+            <span class="cap-chip">{chip}</span>
+        {/each}
+        {#if experiment}
+            <div class="exp-meta">
+                <span class="meta-tag">system: {systemLabel()}</span>
+                <span class="meta-tag">model: {modelLabel()}</span>
+            </div>
+        {/if}
     </div>
 
     {#if noSystemMetadata}
@@ -582,18 +621,48 @@
 
     <!-- Controls bar -->
     <div class="controls-bar">
-        <div class="trial-picker">
+        {#if recording.nTrials > 1}
+            <div class="trial-picker">
+                <button
+                    class="trial-btn"
+                    disabled={$activeTrialIndex === 0}
+                    onclick={() => activeTrialIndex.update(r => Math.max(0, r - 1))}
+                >‹</button>
+                <span class="trial-label">Trial {$activeTrialIndex + 1}/{recording.nTrials}</span>
+                <button
+                    class="trial-btn"
+                    disabled={$activeTrialIndex >= recording.nTrials - 1}
+                    onclick={() => activeTrialIndex.update(r => Math.min(recording.nTrials - 1, r + 1))}
+                >›</button>
+            </div>
+            <div class="time-divider"></div>
+        {/if}
+
+        <div class="view-mode-group" role="group" aria-label="View mode">
             <button
-                class="trial-btn"
-                disabled={$activeExpRow === 0}
-                onclick={() => activeExpRow.update(r => Math.max(0, r - 1))}
-            >‹</button>
-            <span class="trial-label">Trial {$activeExpRow + 1}/{experiment.n_shards}</span>
+                class="mode-btn"
+                class:active={$recordingViewMode === 'spikes'}
+                class:disabled-mode={!caps.spikes}
+                disabled={!caps.spikes}
+                title={caps.spikes ? 'Spike rasters and per-neuron spikes' : 'Not available for this recording'}
+                onclick={() => setViewMode('spikes')}
+            >Spikes</button>
             <button
-                class="trial-btn"
-                disabled={$activeExpRow >= experiment.n_shards - 1}
-                onclick={() => activeExpRow.update(r => Math.min(experiment.n_shards - 1, r + 1))}
-            >›</button>
+                class="mode-btn"
+                class:active={$recordingViewMode === 'neuron_voltage'}
+                class:disabled-mode={!caps.neuronVoltages}
+                disabled={!caps.neuronVoltages}
+                title={caps.neuronVoltages ? 'Neuron voltage traces' : 'Not available for this recording'}
+                onclick={() => setViewMode('neuron_voltage')}
+            >Voltage</button>
+            <button
+                class="mode-btn"
+                class:active={$recordingViewMode === 'channel_lfp'}
+                class:disabled-mode={!caps.channelLfp}
+                disabled={!caps.channelLfp}
+                title={caps.channelLfp ? 'Channel LFP and electrode spikes' : 'Not available for this recording'}
+                onclick={() => setViewMode('channel_lfp')}
+            >Channel LFP</button>
         </div>
 
         <div class="time-divider"></div>
@@ -629,23 +698,31 @@
 
         <div class="time-divider"></div>
 
-        <label class="toggle-label" title="Show spike raster">
-            <input type="checkbox" bind:checked={showRaster} />
-            <span>Raster</span>
-        </label>
-
-        {#if showRaster}
-            <label class="toggle-label" title="Show all neurons (scatter)">
-                <input type="checkbox" bind:checked={rasterAllNeurons} />
-                <span>All</span>
+        {#if caps.spikes && $recordingViewMode === 'spikes'}
+            <label class="toggle-label" title="Show spike raster">
+                <input type="checkbox" bind:checked={showRaster} />
+                <span>Raster</span>
             </label>
+
+            {#if showRaster}
+                <label class="toggle-label" title="Show all neurons (scatter)">
+                    <input type="checkbox" bind:checked={rasterAllNeurons} />
+                    <span>All</span>
+                </label>
+            {/if}
         {/if}
     </div>
 
     <div class="divider"></div>
 
+    {#if $recordingViewMode === 'spikes' && !caps.spikes}
+        <div class="mode-hint">
+            Spikes not available for acquired recordings until ingested into dataset format.
+        </div>
+    {/if}
+
     <!-- Spike raster -->
-    {#if showRaster}
+    {#if showRaster && caps.spikes && $recordingViewMode === 'spikes'}
         <div class="raster-wrap">
             <div class="raster-hdr">
                 <span class="section-title">Spike Raster</span>
@@ -676,62 +753,98 @@
         <div class="divider"></div>
     {/if}
 
-    <!-- Neuron charts -->
+    {#if showChannelOverview && recording.bio}
+        <div class="signal-overview">
+            <SignalViewer
+                rec={recording.bio.apiPath}
+                totalDuration={recording.bio.durS}
+                totalChannels={recording.bio.channels}
+                focusedChannel={null}
+            />
+        </div>
+        <div class="divider"></div>
+    {/if}
+
+    <!-- Neuron / electrode charts -->
     <div class="neurons-area">
-        {#if $selectedNeurons.length === 0 && $selectedElectrode === null}
-            <div class="empty-msg">No neurons selected — click a neuron in the 3D view</div>
+        {#if !showChannelOverview && $selectedNeurons.length === 0 && $selectedElectrode === null}
+            {#if $recordingViewMode === 'spikes' && caps.spikes}
+                <div class="empty-msg">Select a neuron in the 3D view to see spike rasters</div>
+            {:else if $recordingViewMode === 'neuron_voltage' && caps.neuronVoltages}
+                <div class="empty-msg">Select a neuron in the 3D view to see voltage traces</div>
+            {:else if $recordingViewMode === 'channel_lfp' && caps.channelLfp}
+                <div class="empty-msg">Select an electrode in the 3D view to see channel LFP</div>
+            {/if}
         {:else}
             {#if loadError}
                 <div class="load-error">{loadError}</div>
             {/if}
 
-            {#each $selectedNeurons as gid (gid)}
-                {@const pop = popForGid(gid)}
-                <div class="neuron-row">
-                    <div class="neuron-label">
-                        <span class="gid">GID {gid}</span>
-                        {#if pop}
-                            <span class="pop-tag" class:exc={pop === 'EXC'} class:inh={pop === 'INH'}>{pop}</span>
-                        {/if}
-                        <button class="desel-btn" onclick={() => deselectNeuron(gid)} title="Deselect">×</button>
-                    </div>
-
-                    <div class="charts">
-                        <div class="chart-wrap">
-                            <div class="chart-header">
-                                <span class="chart-title">spikes</span>
-                                <div class="chart-actions">
-                                    <button class="action-icon-btn" onclick={() => exportChart(gid, 'spikes')} title="Export PNG">↓</button>
-                                    <button class="expand-btn" onclick={() => openModal(gid, 'spikes')} title="Expand">⤢</button>
-                                </div>
-                            </div>
-                            <canvas
-                                width="400" height="44"
-                                use:spikeAction={{ gid, rowData, cursor: timeCursor }}
-                            ></canvas>
+            {#if $recordingViewMode === 'spikes' && caps.spikes}
+                {#each $selectedNeurons as gid (gid)}
+                    {@const pop = popForGid(gid)}
+                    <div class="neuron-row">
+                        <div class="neuron-label">
+                            <span class="gid">GID {gid}</span>
+                            {#if pop}
+                                <span class="pop-tag" class:exc={pop === 'EXC'} class:inh={pop === 'INH'}>{pop}</span>
+                            {/if}
+                            <button class="desel-btn" onclick={() => deselectNeuron(gid)} title="Deselect">×</button>
                         </div>
 
-                        {#if hasVoltage(gid)}
+                        <div class="charts">
                             <div class="chart-wrap">
                                 <div class="chart-header">
-                                    <span class="chart-title">voltage</span>
+                                    <span class="chart-title">spikes</span>
                                     <div class="chart-actions">
-                                        <button class="action-icon-btn" onclick={() => exportChart(gid, 'voltage')} title="Export PNG">↓</button>
-                                        <button class="expand-btn" onclick={() => openModal(gid, 'voltage')} title="Expand">⤢</button>
+                                        <button class="action-icon-btn" onclick={() => exportChart(gid, 'spikes')} title="Export PNG">↓</button>
+                                        <button class="expand-btn" onclick={() => openModal(gid, 'spikes')} title="Expand">⤢</button>
                                     </div>
                                 </div>
                                 <canvas
-                                    width="400" height="60"
-                                    use:voltAction={{ gid, rowData, cursor: timeCursor }}
+                                    width="400" height="44"
+                                    use:spikeAction={{ gid, rowData, cursor: timeCursor }}
                                 ></canvas>
                             </div>
-                        {/if}
+                        </div>
                     </div>
-                </div>
-            {/each}
+                {/each}
+            {/if}
+
+            {#if $recordingViewMode === 'neuron_voltage' && caps.neuronVoltages}
+                {#each $selectedNeurons as gid (gid)}
+                    {@const pop = popForGid(gid)}
+                    {#if hasVoltage(gid)}
+                        <div class="neuron-row">
+                            <div class="neuron-label">
+                                <span class="gid">GID {gid}</span>
+                                {#if pop}
+                                    <span class="pop-tag" class:exc={pop === 'EXC'} class:inh={pop === 'INH'}>{pop}</span>
+                                {/if}
+                                <button class="desel-btn" onclick={() => deselectNeuron(gid)} title="Deselect">×</button>
+                            </div>
+                            <div class="charts">
+                                <div class="chart-wrap">
+                                    <div class="chart-header">
+                                        <span class="chart-title">voltage</span>
+                                        <div class="chart-actions">
+                                            <button class="action-icon-btn" onclick={() => exportChart(gid, 'voltage')} title="Export PNG">↓</button>
+                                            <button class="expand-btn" onclick={() => openModal(gid, 'voltage')} title="Expand">⤢</button>
+                                        </div>
+                                    </div>
+                                    <canvas
+                                        width="400" height="60"
+                                        use:voltAction={{ gid, rowData, cursor: timeCursor }}
+                                    ></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    {/if}
+                {/each}
+            {/if}
 
             <!-- Electrode panel -->
-            {#if $selectedElectrode !== null}
+            {#if $recordingViewMode === 'channel_lfp' && caps.channelLfp && $selectedElectrode !== null}
                 <div class="electrode-row">
                     <div class="neuron-label">
                         <span class="electrode-id">CH {$selectedElectrode}</span>
@@ -744,16 +857,18 @@
                         {:else if electrodeError}
                             <div class="load-error">{electrodeError}</div>
                         {:else if electrodeData}
-                            <div class="chart-wrap">
-                                <div class="chart-header">
-                                    <span class="chart-title">channel spikes</span>
-                                    <button class="expand-btn" onclick={() => openElectrodeModal('electrode-spikes')} title="Expand">⤢</button>
+                            {#if recording.source === 'simulated' && electrodeData.spikeTimes.length > 0}
+                                <div class="chart-wrap">
+                                    <div class="chart-header">
+                                        <span class="chart-title">channel spikes</span>
+                                        <button class="expand-btn" onclick={() => openElectrodeModal('electrode-spikes')} title="Expand">⤢</button>
+                                    </div>
+                                    <canvas
+                                        width="400" height="44"
+                                        use:electrodeSpikesAction={{ data: electrodeData, cursor: timeCursor }}
+                                    ></canvas>
                                 </div>
-                                <canvas
-                                    width="400" height="44"
-                                    use:electrodeSpikesAction={{ data: electrodeData, cursor: timeCursor }}
-                                ></canvas>
-                            </div>
+                            {/if}
                             {#if electrodeData.hasLfp}
                                 <div class="chart-wrap">
                                     <div class="chart-header">
@@ -767,7 +882,7 @@
                                 </div>
                             {/if}
                         {:else}
-                            <div class="electrode-loading">Select an experiment trial to load electrode data.</div>
+                            <div class="electrode-loading">No electrode data for this channel.</div>
                         {/if}
                     </div>
                 </div>
@@ -802,8 +917,62 @@
         font-size: 11px; padding: 2px 8px; border-radius: 3px; cursor: pointer; flex-shrink: 0;
     }
     .back-btn:hover { color: #ccc; border-color: #666; }
-    .exp-name { font-weight: 700; color: #66bb6a; font-size: 13px; flex-shrink: 0; }
+    .exp-name { font-weight: 700; color: #e0e0e0; font-size: 13px; flex-shrink: 0; }
+    .source-tag {
+        font-size: 9px;
+        padding: 2px 6px;
+        border-radius: 3px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+    .source-tag.sim { background: #1a2a3a; border: 1px solid #4fc3f7; color: #4fc3f7; }
+    .source-tag.acq { background: #1a3a1a; border: 1px solid #66bb6a; color: #66bb6a; }
+    .cap-chip {
+        font-size: 9px;
+        padding: 2px 5px;
+        border-radius: 3px;
+        background: #16162a;
+        border: 1px solid #444;
+        color: #888;
+    }
     .exp-meta { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+    .mode-hint {
+        font-size: 11px;
+        color: #888;
+        padding: 8px 12px;
+        background: #16162a;
+        border-bottom: 1px solid #2a2a4a;
+        flex-shrink: 0;
+    }
+    .signal-overview {
+        flex: 1;
+        min-height: 200px;
+        max-height: 40vh;
+        display: flex;
+        overflow: hidden;
+    }
+    .signal-overview :global(> *) {
+        flex: 1;
+        min-height: 0;
+    }
+    .view-mode-group {
+        display: flex;
+        gap: 2px;
+        flex-shrink: 0;
+    }
+    .mode-btn {
+        background: none;
+        border: 1px solid #333;
+        color: #666;
+        font-size: 10px;
+        padding: 3px 8px;
+        border-radius: 3px;
+        cursor: pointer;
+    }
+    .mode-btn:hover:not(:disabled) { color: #ccc; border-color: #555; }
+    .mode-btn.active { border-color: #66bb6a; color: #66bb6a; background: #162216; }
+    .mode-btn.disabled-mode,
+    .mode-btn:disabled { opacity: 0.35; cursor: not-allowed; }
     .meta-tag {
         font-size: 10px; color: #555;
         background: #16162a; border: 1px solid #2a2a4a;

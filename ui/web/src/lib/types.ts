@@ -88,6 +88,23 @@ export interface EnvPreset {
     load: { kind: 'builtin-culture' } | { kind: 'command'; code: string };
 }
 
-export type ActiveRecording =
-    | { kind: 'experiment'; experiment: Experiment }
-    | { kind: 'bio'; recording: BioRecording };
+export type RecordingSource = 'simulated' | 'acquired';
+
+export interface RecordingCapabilities {
+    spikes: boolean;
+    neuronVoltages: boolean;
+    channelLfp: boolean;
+}
+
+export interface Recording {
+    id: string;
+    name: string;
+    source: RecordingSource;
+    capabilities: RecordingCapabilities;
+    nTrials: number;
+    durationMs: number;
+    experiment?: Experiment;
+    bio?: BioRecording;
+}
+
+export type RecordingViewMode = 'spikes' | 'neuron_voltage' | 'channel_lfp';

@@ -1,7 +1,7 @@
 import { loadPyodide as _loadPyodide, type PyodideInterface } from 'pyodide';
 import type { CultureSpec } from './cultureGeneration';
 import { DEFAULT_CULTURE_SPEC } from './cultureGeneration';
-import type { EnvSnapshot } from './types';
+import type { BioRecording, EnvSnapshot } from './types';
 import { pyodideReady, hsdsConnected, backendInfo, loading, lastError, lastExecTime, updateStores, snapshotLog } from './stores';
 
 let pyodide: PyodideInterface | null = null;
@@ -645,6 +645,92 @@ export type ElectrodeData = {
     lfp: number[];
     spikeTimes: number[];
 };
+
+export type RecordingBackend = 'hf' | 'bio';
+
+let recordingBackend: RecordingBackend = 'hf';
+
+interface AcquiredBioState {
+    apiPath: string;
+    durationMs: number;
+    channels: number;
+}
+
+let acquiredBioState: AcquiredBioState | null = null;
+
+const BIO_WIN_DUR_S = 5;
+const BIO_DOWNSAMPLE = 100;
+
+export function setRecordingBackend(backend: RecordingBackend): void {
+    recordingBackend = backend;
+}
+
+export function setAcquiredBio(bio: BioRecording): void {
+    acquiredBioState = {
+        apiPath: bio.apiPath,
+        durationMs: bio.durS * 1000,
+        channels: bio.channels,
+    };
+    recordingBackend = 'bio';
+}
+
+export function clearAcquiredBio(): void {
+    acquiredBioState = null;
+}
+
+export function getRecordingBackend(): RecordingBackend {
+    return recordingBackend;
+}
+
+export async function getTrialNeuronData(rowIdx: number, gids: number[]): Promise<RowData> {
+    if (recordingBackend === 'bio') {
+        const dur = acquiredBioState?.durationMs ?? 1000;
+        return { duration: dur, spikes: {}, voltages: {} };
+    }
+    return getExpRowData(rowIdx, gids);
+}
+
+async function fetchBioElectrodeData(
+    electrodeId: number,
+    timeCursorMs: number,
+    state: AcquiredBioState
+): Promise<ElectrodeData> {
+    const maxOffsetS = Math.max(0, state.durationMs / 1000 - BIO_WIN_DUR_S);
+    const offsetS = Math.min(
+        Math.max(0, timeCursorMs / 1000 - BIO_WIN_DUR_S / 2),
+        maxOffsetS
+    );
+    const ch = Math.min(Math.max(0, electrodeId), Math.max(0, state.channels - 1));
+    const qs = new URLSearchParams({
+        rec: state.apiPath,
+        offset_s: offsetS.toString(),
+        dur_s: BIO_WIN_DUR_S.toString(),
+        downsample: BIO_DOWNSAMPLE.toString(),
+        ch_start: ch.toString(),
+        ch_end: (ch + 1).toString(),
+    });
+    const resp = await fetch(`/bio-api/chunk?${qs}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+    const buf = await resp.arrayBuffer();
+    const samples = new Float32Array(buf);
+    return {
+        duration: state.durationMs,
+        hasLfp: samples.length > 0,
+        lfp: Array.from(samples),
+        spikeTimes: [],
+    };
+}
+
+export async function getTrialElectrodeData(
+    rowIdx: number,
+    electrodeId: number,
+    timeCursorMs = 0
+): Promise<ElectrodeData> {
+    if (recordingBackend === 'bio' && acquiredBioState) {
+        return fetchBioElectrodeData(electrodeId, timeCursorMs, acquiredBioState);
+    }
+    return getElectrodeData(rowIdx, electrodeId);
+}
 
 export async function getElectrodeData(rowIdx: number, electrodeId: number): Promise<ElectrodeData> {
     if (!pyodide) throw new Error('Pyodide not initialized');

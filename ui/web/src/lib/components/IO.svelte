@@ -129,7 +129,7 @@
     }
 
     function onPointerUp(e: PointerEvent) {
-        if ($activeRecording === null) return;
+        if ($activeRecording === null || !$activeRecording.capabilities.channelLfp) return;
 
         const canvas = renderer.domElement;
         const rect = canvas.getBoundingClientRect();

@@ -1,6 +1,7 @@
 <script lang="ts">
     import { datasetLoading, datasetError } from '$lib/stores';
     import { loadExperimentDataset } from '$lib/pyodide';
+    import { BUILTIN_EXPERIMENTS } from '$lib/recordingCatalog';
     import type { Experiment, ExpMeta } from '$lib/types';
 
     const FILE_SERVER = '';
@@ -11,23 +12,6 @@
     }
     let { onSelect, compact = false }: Props = $props();
 
-    // Built-in experiments: synthetic data in Pyodide (no file server), like demo/neural1
-    const BUILTIN_EXPERIMENTS: Experiment[] = [
-        {
-            name: 'EI1_spikes',
-            root: 'built-in',
-            path: '',
-            kind: 'builtin',
-            created_at: null,
-            n_shards: 3,
-            metadata: {
-                duration: 1000,
-                system: { uri: './systems/graphs/EI1', populations: ['EXC', 'INH'], n_neurons: 10 },
-                model: 'ReducedCalciumSomaDendrite',
-                recording: { spikes: true, voltages: false, membrane_currents: true },
-            },
-        },
-    ];
     const BUILTIN_NAMES = new Set(BUILTIN_EXPERIMENTS.map(e => e.name));
 
     let experiments  = $state<Experiment[]>([]);

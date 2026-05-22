@@ -1,7 +1,7 @@
 import { writable } from 'svelte/store';
 import type {
     SystemData, IOData, ModelData, DecodingData, ViewConfig, TooltipData, EnvSnapshot,
-    Experiment, ActiveRecording,
+    Recording, RecordingViewMode,
 } from './types';
 
 export const pyodideReady = writable(false);
@@ -43,21 +43,24 @@ export const pendingCommand = writable<string | null>(null);
 export const datasetLoading = writable<boolean>(false);
 export const datasetError   = writable<string | null>(null);
 
-export const selectedNeurons  = writable<number[]>([]);
-export const activeExperiment = writable<Experiment | null>(null);
-export const activeExpRow     = writable<number>(0);
+export const selectedNeurons = writable<number[]>([]);
 export const selectedElectrode = writable<number | null>(null);
+export const activeTrialIndex = writable<number>(0);
+/** @deprecated Use activeTrialIndex */
+export const activeExpRow = activeTrialIndex;
 
-export const activeRecording = writable<ActiveRecording | null>(null);
+export const activeRecording = writable<Recording | null>(null);
+export const recordingViewMode = writable<RecordingViewMode>('channel_lfp');
 export const envRightTab = writable<'console' | 'recording'>('console');
 
 export function clearActiveRecording(): void {
     activeRecording.set(null);
-    activeExperiment.set(null);
     selectedNeurons.set([]);
     selectedElectrode.set(null);
-    activeExpRow.set(0);
+    activeTrialIndex.set(0);
+    recordingViewMode.set('channel_lfp');
 }
+
 function logSnapshot(msg: string) {
     const ts = new Date().toLocaleTimeString();
     snapshotLog.update((log) => [...log.slice(-19), `[${ts}] ${msg}`]);

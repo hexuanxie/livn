@@ -1,21 +1,10 @@
 <script lang="ts">
+    import { BUILTIN_BIO_RECORDINGS } from '$lib/recordingCatalog';
     import type { BioRecording } from '$lib/types';
 
     let { onSelect, compact = false }: { onSelect: (rec: BioRecording) => void; compact?: boolean } = $props();
 
-    const BUILTIN: BioRecording[] = [
-        {
-            id: 'demo-neural1',
-            name: 'Demo Recording',
-            date: '—',
-            dur: '1 min 0 s',
-            durS: 60,
-            channels: 512,
-            kind: 'builtin',
-            apiPath: 'demo/neural1',
-            protocol: 'LFP (θ 8 Hz + γ 40 Hz) + TTL stim @ 1 Hz',
-        },
-    ];
+    const BUILTIN = BUILTIN_BIO_RECORDINGS;
 
     // ── User recordings (persisted to localStorage) ───────────────────────
     const LS_KEY = 'livn_bio_recordings';
