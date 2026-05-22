@@ -5,7 +5,13 @@ import type { Plugin, Connect } from 'vite';
 
 const LOCAL_ASSETS = ['pyodide.asm.js', 'pyodide.asm.wasm', 'python_stdlib.zip', 'pyodide-lock.json'];
 
-const INIT_PACKAGES = ['micropip', 'numpy', 'scipy', 'pandas', 'pydantic'];
+const INIT_PACKAGES = [
+    'micropip', 'numpy', 'scipy', 'pandas', 'pydantic', 'tqdm',
+    'fsspec', 'httpcore', 'httpx', 'pyyaml', 'packaging', 'requests',
+];
+
+/** HF `datasets` stack (large wheels pre-cached for dev). */
+const DATASET_PACKAGES = ['pyarrow', 'xxhash', 'lzma'];
 
 type LockPackage = { depends?: string[]; file_name: string; package_type?: string };
 type PyodideLock = { packages: Record<string, LockPackage> };
@@ -27,7 +33,7 @@ function bootstrapArtifacts(lock: PyodideLock): string[] {
         for (const dep of pkg.depends ?? []) visit(dep);
         files.add(pkg.file_name);
     };
-    for (const name of INIT_PACKAGES) visit(name);
+    for (const name of [...INIT_PACKAGES, ...DATASET_PACKAGES]) visit(name);
     return [...files];
 }
 

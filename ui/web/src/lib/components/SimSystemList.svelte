@@ -15,6 +15,9 @@
         pops: 'EXC, INH',
     };
 
+    /** Hugging Face predefined systems — hidden while Demo Culture is the default entry point. */
+    const SHOW_PREDEFINED = false;
+
     const PREDEFINED_SYSTEMS: SystemCard[] = [
         { id: 'EI1',  name: 'EI1',  desc: 'Excitatory-Inhibitory network, type 1', pops: 'EXC, INH' },
         { id: 'EI2',  name: 'EI2',  desc: 'Excitatory-Inhibitory network, type 2', pops: 'EXC, INH' },
@@ -71,25 +74,27 @@
         {/if}
     </div>
 
-    <div class="section">
-        <div class="section-header">
-            <span class="section-name">predefined</span>
-            <span class="section-hint">downloads from Hugging Face</span>
+    {#if SHOW_PREDEFINED}
+        <div class="section">
+            <div class="section-header">
+                <span class="section-name">predefined</span>
+                <span class="section-hint">downloads from Hugging Face</span>
+            </div>
+            <div class="grid">
+                {#each PREDEFINED_SYSTEMS as sys (sys.id)}
+                    <button
+                        class="card"
+                        class:loading={loadingId === sys.id}
+                        onclick={() => select(sys)}
+                    >
+                        <div class="card-name">{sys.name}</div>
+                        <div class="card-desc">{sys.desc}</div>
+                        <div class="card-tag">{sys.pops}</div>
+                    </button>
+                {/each}
+            </div>
         </div>
-        <div class="grid">
-            {#each PREDEFINED_SYSTEMS as sys (sys.id)}
-                <button
-                    class="card"
-                    class:loading={loadingId === sys.id}
-                    onclick={() => select(sys)}
-                >
-                    <div class="card-name">{sys.name}</div>
-                    <div class="card-desc">{sys.desc}</div>
-                    <div class="card-tag">{sys.pops}</div>
-                </button>
-            {/each}
-        </div>
-    </div>
+    {/if}
 </div>
 
 <style>

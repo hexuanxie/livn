@@ -42,7 +42,10 @@ async function _initPyodide(onLog: (msg: string) => void): Promise<void> {
     // Verify micropip is importable (loadPackage alone can fail silently via CDN/SW issues)
     await pyodide.runPythonAsync('import micropip');
 
-    await pyodide.loadPackage(['numpy', 'scipy', 'pandas', 'pydantic-core', 'pydantic']);
+    await pyodide.loadPackage([
+        'numpy', 'scipy', 'pandas', 'pydantic-core', 'pydantic',
+        'fsspec', 'httpcore', 'httpx', 'pyyaml', 'packaging', 'requests', 'pyarrow',
+    ]);
 
     onLog('Installing livn…');
     const manifest = await fetch('/wheel.json').then(r => r.json());
@@ -53,7 +56,7 @@ async function _initPyodide(onLog: (msg: string) => void): Promise<void> {
 import os
 os.environ['TQDM_DISABLE'] = '1'
 import micropip
-await micropip.install(['fsspec', 'gymnasium', 'pyfive', 'huggingface_hub', 'httpcore'])
+await micropip.install(['gymnasium', 'pyfive', 'huggingface_hub', 'httpcore', 'httpx'])
 await micropip.install('emfs:///${manifest.filename}', deps=False)
     `);
 
@@ -384,25 +387,52 @@ _snapshot()
 
 let datasetsInstalled = false;
 
+/** Pyodide lock packages needed before Hugging Face `datasets` (hub is micropip-only). */
+const PYODIDE_DATASET_PACKAGES = [
+    'pyarrow', 'xxhash', 'lzma', 'tqdm', 'fsspec', 'httpcore', 'httpx', 'pyyaml', 'packaging', 'requests',
+] as const;
+
+const MICROPIP_DATASET_DEPS = [
+    'pyarrow', 'huggingface_hub', 'httpcore', 'httpx', 'pyyaml', 'packaging', 'requests',
+] as const;
+
+const ENSURE_PYARROW_PY = `
+try:
+    import pyarrow as _pa
+except ImportError:
+    import micropip
+    await micropip.install('pyarrow')
+    import pyarrow as _pa
+`;
+
 const BUILTIN_DATASET_SPECS: Record<string, { n_rows: number; duration: number; n_neurons: number; seed: number }> = {
     EI1_spikes: { n_rows: 3, duration: 1000, n_neurons: 10, seed: 42 },
 };
 
+const TQDM_THREAD_MAP_PATCH = `
+import tqdm.contrib.concurrent as _tcc
+# Pyodide has no threads; datasets uses thread_map for parallel map
+_tcc.thread_map = lambda fn, iterable, *a, **kw: list(map(fn, iterable))
+`;
+
 async function ensureHFDatasetsReady(): Promise<void> {
     await initPyodide(() => {});
     const py = pyodide!;
-    await py.loadPackage(['pyarrow', 'xxhash', 'lzma']);
+    // Load pyarrow first (large wheel; other dataset deps are smaller)
+    await py.loadPackage('pyarrow');
+    await py.runPythonAsync(ENSURE_PYARROW_PY);
+    await py.loadPackage([...PYODIDE_DATASET_PACKAGES].filter((p) => p !== 'pyarrow'));
+    await py.runPythonAsync(TQDM_THREAD_MAP_PATCH);
     if (!datasetsInstalled) {
+        const micropipDeps = MICROPIP_DATASET_DEPS.map((d) => JSON.stringify(d)).join(', ');
         await py.runPythonAsync(`
 import micropip
+await micropip.install([${micropipDeps}])
 await micropip.install('datasets')
 `);
         datasetsInstalled = true;
     }
-    await py.runPythonAsync(`
-import tqdm.contrib.concurrent as _tcc
-_tcc.thread_map = lambda fn, *iters, **kw: list(map(fn, *iters))
-`);
+    await py.runPythonAsync(ENSURE_PYARROW_PY);
 }
 
 /** Synthetic demo dataset — no file server; same idea as demo/neural1 bio recording. */
