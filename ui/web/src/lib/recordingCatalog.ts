@@ -17,7 +17,7 @@ export const BUILTIN_EXPERIMENTS: Experiment[] = [
         n_shards: 3,
         metadata: {
             duration: 1000,
-            system: { uri: './systems/graphs/EI1', populations: ['EXC', 'INH'], n_neurons: 10 },
+            system: { uri: './systems/graphs/EI1', populations: ['EXC', 'INH'], n_neurons: 10_000 },
             model: 'ReducedCalciumSomaDendrite',
             recording: { spikes: true, voltages: false, membrane_currents: true },
         },

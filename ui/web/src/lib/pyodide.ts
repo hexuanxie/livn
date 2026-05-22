@@ -1,6 +1,8 @@
 import { loadPyodide as _loadPyodide, type PyodideInterface } from 'pyodide';
 import type { CultureSpec } from './cultureGeneration';
 import { DEFAULT_CULTURE_SPEC } from './cultureGeneration';
+
+const BUILTIN_DEMO_NEURONS = DEFAULT_CULTURE_SPEC.totalNeurons;
 import type { BioRecording, EnvSnapshot } from './types';
 import { get } from 'svelte/store';
 import { pyodideReady, hsdsConnected, backendInfo, loading, lastError, lastExecTime, updateStores, snapshotLog, pendingCommand } from './stores';
@@ -443,7 +445,7 @@ except ImportError:
 `;
 
 const BUILTIN_DATASET_SPECS: Record<string, { n_rows: number; duration: number; n_neurons: number; seed: number }> = {
-    demo: { n_rows: 3, duration: 1000, n_neurons: 10, seed: 42 },
+    demo: { n_rows: 3, duration: 1000, n_neurons: BUILTIN_DEMO_NEURONS, seed: 42 },
 };
 
 const TQDM_THREAD_MAP_PATCH = `
@@ -483,20 +485,35 @@ import numpy as _np
 from datasets import Dataset as _Dataset
 
 _rng = _np.random.default_rng(${spec.seed})
+_n_neurons = int(${spec.n_neurons})
+_duration = float(${spec.duration})
 _rows = []
-for _ in range(${spec.n_rows}):
-    _n = int(_rng.integers(12, 35))
-    _it = _rng.integers(0, ${spec.n_neurons}, size=_n).astype(_np.int32).tolist()
-    _tt = _rng.uniform(0, ${spec.duration}, size=_n).astype(_np.float32).tolist()
+for _trial in range(${spec.n_rows}):
+    # ~25% of culture neurons fire in each trial, each with several spikes (ms timestamps)
+    _n_active = int(_n_neurons * _rng.uniform(0.2, 0.35))
+    _active_ids = _rng.choice(_n_neurons, size=max(1, _n_active), replace=False)
+    _it_list = []
+    _tt_list = []
+    for _gid in _active_ids:
+        _n_sp = int(_rng.integers(8, 28))
+        _times = _rng.uniform(0, _duration, size=_n_sp)
+        _it_list.extend([int(_gid)] * _n_sp)
+        _tt_list.extend(_times.astype(_np.float32).tolist())
+    _order = _rng.permutation(len(_it_list))
+    _it = [_it_list[int(i)] for i in _order]
+    _tt = [_tt_list[int(i)] for i in _order]
     _rows.append({
-        'duration': ${spec.duration},
+        'duration': int(_duration),
         'it': _it,
         'tt': _tt,
         'iv': [],
         'vv': [],
     })
 loaded_dataset = _Dataset.from_list(_rows)
-print(f"loaded_dataset ready: {loaded_dataset.num_rows} rows, features: {list(loaded_dataset.features)}")
+print(
+    f"loaded_dataset ready: {loaded_dataset.num_rows} trials, "
+    f"{sum(len(r['it']) for r in _rows)} spikes, neuron ids 0..{_n_neurons - 1}"
+)
 `);
 }
 
