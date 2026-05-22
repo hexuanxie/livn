@@ -51,7 +51,7 @@ export const activeExpRow = activeTrialIndex;
 
 export const activeRecording = writable<Recording | null>(null);
 export const recordingViewMode = writable<RecordingViewMode>('channel_lfp');
-export const envRightTab = writable<'console' | 'recording'>('console');
+export const envRightTab = writable<'console' | 'recording'>('recording');
 
 export function clearActiveRecording(): void {
     activeRecording.set(null);
@@ -87,7 +87,12 @@ function normalizeSystemData(raw: SystemData): SystemData {
 
 export function updateStores(snapshot: EnvSnapshot | null) {
     if (!snapshot) {
-        logSnapshot('updateStores called with null snapshot');
+        logSnapshot('updateStores: clearing env (null snapshot)');
+        envSystem.set(null);
+        envIO.set(null);
+        envModel.set(null);
+        envDecoding.set(null);
+        prevSnapshot = null;
         return;
     }
 

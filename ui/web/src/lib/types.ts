@@ -85,7 +85,7 @@ export interface EnvPreset {
     id: string;
     name: string;
     description: string;
-    load: { kind: 'builtin-culture' } | { kind: 'command'; code: string };
+    load: { kind: 'builtin-culture' } | { kind: 'empty' } | { kind: 'command'; code: string };
 }
 
 export type RecordingSource = 'simulated' | 'acquired';

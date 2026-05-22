@@ -44,6 +44,8 @@
                 <div class="card-desc">{preset.description}</div>
                 {#if preset.id === 'demo-default'}
                     <div class="card-meta">{neuronLabel}</div>
+                {:else if preset.id === 'empty'}
+                    <div class="card-meta">Start from scratch · Build or Console</div>
                 {/if}
             </button>
         {/each}

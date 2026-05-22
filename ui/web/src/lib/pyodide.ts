@@ -2,11 +2,13 @@ import { loadPyodide as _loadPyodide, type PyodideInterface } from 'pyodide';
 import type { CultureSpec } from './cultureGeneration';
 import { DEFAULT_CULTURE_SPEC } from './cultureGeneration';
 import type { BioRecording, EnvSnapshot } from './types';
-import { pyodideReady, hsdsConnected, backendInfo, loading, lastError, lastExecTime, updateStores, snapshotLog } from './stores';
+import { get } from 'svelte/store';
+import { pyodideReady, hsdsConnected, backendInfo, loading, lastError, lastExecTime, updateStores, snapshotLog, pendingCommand } from './stores';
 
 let pyodide: PyodideInterface | null = null;
 let idbfsMounted = false;
 let initPromise: Promise<void> | null = null;
+let envBootstrapPromise: Promise<void> | null = null;
 
 function logSnap(msg: string) {
     const ts = new Date().toLocaleTimeString();
@@ -78,6 +80,25 @@ await micropip.install('emfs:///${manifest.filename}', deps=False)
 
     pyodideReady.set(true);
     onLog('Ready');
+}
+
+/** Initialize Pyodide once and run any queued env setup (e.g. demo culture on env open). */
+export function ensureEnvBootstrap(onLog: (msg: string) => void = () => {}): Promise<void> {
+    if (!envBootstrapPromise) {
+        envBootstrapPromise = (async () => {
+            await initPyodide(onLog);
+            let code = get(pendingCommand);
+            while (code) {
+                pendingCommand.set(null);
+                await executeCode(code);
+                code = get(pendingCommand);
+            }
+        })().catch((e) => {
+            envBootstrapPromise = null;
+            throw e;
+        });
+    }
+    return envBootstrapPromise;
 }
 
 /** Python helpers for built-in demo culture (console: load_demo_culture()). */
@@ -230,6 +251,17 @@ export function builtinCultureSetupCode(spec: CultureSpec = DEFAULT_CULTURE_SPEC
         `    shape='${shape}',`,
         `    disk_radius=${spec.diskRadius},`,
         ')',
+    ].join('\n');
+}
+
+/** Console code for a blank env (no culture, no dataset). */
+export function emptyEnvironmentSetupCode(): string {
+    return [
+        '# Empty environment — design via Build tab or Console',
+        'env = None',
+        "if 'loaded_dataset' in globals():",
+        '    loaded_dataset = None',
+        "print('Empty environment ready. Use the Build tab to design a culture, or the Console to load a system.')",
     ].join('\n');
 }
 
@@ -406,7 +438,7 @@ except ImportError:
 `;
 
 const BUILTIN_DATASET_SPECS: Record<string, { n_rows: number; duration: number; n_neurons: number; seed: number }> = {
-    EI1_spikes: { n_rows: 3, duration: 1000, n_neurons: 10, seed: 42 },
+    demo: { n_rows: 3, duration: 1000, n_neurons: 10, seed: 42 },
 };
 
 const TQDM_THREAD_MAP_PATCH = `

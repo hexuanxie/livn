@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from "svelte";
     import { get } from "svelte/store";
-    import { initPyodide, executeCode } from "$lib/pyodide";
+    import { ensureEnvBootstrap, executeCode } from "$lib/pyodide";
     import { updateStores, pendingCommand } from "$lib/stores";
 
     let terminalEl: HTMLDivElement;
@@ -58,14 +58,12 @@
         terminal.writeln("livn interactive console");
         terminal.writeln("Initializing Pyodide…");
 
-        // Init Pyodide
         try {
-            await initPyodide((msg: string) => {
+            await ensureEnvBootstrap((msg: string) => {
                 terminal.writeln(msg);
             });
             ready = true;
 
-            // Execute any command that was queued before we finished initializing
             const queued = get(pendingCommand);
             if (queued) {
                 const lines = queued.split("\n");

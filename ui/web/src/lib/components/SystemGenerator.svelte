@@ -524,7 +524,7 @@
 
     <!-- ── Left: form ─────────────────────────────────────────────────── -->
     <div class="form-panel">
-        <h2>System Generation</h2>
+        <h2>System</h2>
 
         <div class="field">
             <label class="field-label" for="sg-name">Name</label>

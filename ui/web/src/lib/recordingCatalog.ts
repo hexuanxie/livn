@@ -9,7 +9,7 @@ import type {
 
 export const BUILTIN_EXPERIMENTS: Experiment[] = [
     {
-        name: 'EI1_spikes',
+        name: 'demo',
         root: 'built-in',
         path: '',
         kind: 'builtin',

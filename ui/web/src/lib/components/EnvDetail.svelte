@@ -1,7 +1,9 @@
 <script lang="ts">
+    import { onMount } from 'svelte';
     import ScenePanel from './ScenePanel.svelte';
     import Console from './Console.svelte';
     import RecordingPanel from './RecordingPanel.svelte';
+    import { ensureEnvBootstrap } from '$lib/pyodide';
     import { envRightTab } from '$lib/stores';
     import type { EnvPreset } from '$lib/types';
 
@@ -16,6 +18,11 @@
     function setTab(tab: 'console' | 'recording') {
         envRightTab.set(tab);
     }
+
+    /** Pyodide + queued env setup run here so Recording can be the default tab. */
+    onMount(() => {
+        void ensureEnvBootstrap().catch(() => {});
+    });
 </script>
 
 <div class="env-detail">
@@ -25,22 +32,22 @@
         <div class="tab-bar">
             <button
                 class="tab"
-                class:active={rightTab === 'console'}
-                onclick={() => setTab('console')}
-            >Console</button>
-            <button
-                class="tab"
                 class:active={rightTab === 'recording'}
                 onclick={() => setTab('recording')}
             >Recording</button>
+            <button
+                class="tab"
+                class:active={rightTab === 'console'}
+                onclick={() => setTab('console')}
+            >Console</button>
             <button class="list-btn" onclick={onBack}>← Environments</button>
         </div>
 
         <div class="tab-body">
-            {#if rightTab === 'console'}
-                <Console />
-            {:else}
+            {#if rightTab === 'recording'}
                 <RecordingPanel />
+            {:else}
+                <Console />
             {/if}
         </div>
     </div>

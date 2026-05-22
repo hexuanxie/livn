@@ -6,7 +6,7 @@
     import EnvDetail from '$lib/components/EnvDetail.svelte';
     import SystemGenerator from '$lib/components/SystemGenerator.svelte';
     import { pendingCommand, envRightTab, clearActiveRecording } from '$lib/stores';
-    import { builtinCultureSetupCode } from '$lib/pyodide';
+    import { builtinCultureSetupCode, emptyEnvironmentSetupCode } from '$lib/pyodide';
     import type { EnvPreset } from '$lib/types';
 
     let navTab = $state<'env' | 'build'>('env');
@@ -25,11 +25,13 @@
     async function selectEnv(preset: EnvPreset) {
         selectedPreset = preset;
         navPage = 'detail';
-        envRightTab.set('console');
+        envRightTab.set('recording');
         clearActiveRecording();
 
         if (preset.load.kind === 'builtin-culture') {
             pendingCommand.set(builtinCultureSetupCode());
+        } else if (preset.load.kind === 'empty') {
+            pendingCommand.set(emptyEnvironmentSetupCode());
         } else {
             pendingCommand.set(preset.load.code);
         }
