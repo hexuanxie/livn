@@ -8,7 +8,6 @@
         loading,
         snapshotLog,
     } from "$lib/stores";
-    import { forceRefresh } from "$lib/pyodide";
 
     const backend = $derived($backendInfo);
     const system = $derived($envSystem);
@@ -42,7 +41,10 @@
     <span class="segment right">
         <button
             class="refresh-btn"
-            onclick={() => forceRefresh()}
+            onclick={async () => {
+                const { forceRefresh } = await import('$lib/pyodide');
+                await forceRefresh();
+            }}
             title="Force snapshot refresh">⟳ Refresh</button
         >
         <button

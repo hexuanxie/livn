@@ -1,12 +1,13 @@
 <script lang="ts">
-    let { activeTab, onTabChange }: {
-        activeTab: 'env' | 'build';
+    let { activeTab, onTabChange, onHome }: {
+        activeTab: 'home' | 'env' | 'build';
         onTabChange: (tab: 'env' | 'build') => void;
+        onHome: () => void;
     } = $props();
 </script>
 
 <nav class="nav-bar">
-    <div class="brand">livn</div>
+    <button type="button" class="brand" onclick={onHome} title="Home">livn</button>
     <button class="tab" class:active={activeTab === 'env'} onclick={() => onTabChange('env')}>Viewer</button>
     <button class="tab" class:active={activeTab === 'build'} onclick={() => onTabChange('build')}>Designer</button>
 </nav>
@@ -27,6 +28,14 @@
         color: #4fc3f7;
         letter-spacing: 0.1em;
         margin-right: 20px;
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        font-family: inherit;
+    }
+    .brand:hover {
+        color: #81d4fa;
     }
     .tab {
         background: none;
