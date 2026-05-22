@@ -223,6 +223,55 @@ _snapshot()
 
 let datasetsInstalled = false;
 
+const BUILTIN_DATASET_SPECS: Record<string, { n_rows: number; duration: number; n_neurons: number; seed: number }> = {
+    EI1_spikes: { n_rows: 3, duration: 1000, n_neurons: 10, seed: 42 },
+};
+
+async function ensureHFDatasetsReady(): Promise<void> {
+    await initPyodide(() => {});
+    const py = pyodide!;
+    await py.loadPackage(['pyarrow', 'xxhash', 'lzma']);
+    if (!datasetsInstalled) {
+        await py.runPythonAsync(`
+import micropip
+await micropip.install('datasets')
+`);
+        datasetsInstalled = true;
+    }
+    await py.runPythonAsync(`
+import tqdm.contrib.concurrent as _tcc
+_tcc.thread_map = lambda fn, *iters, **kw: list(map(fn, *iters))
+`);
+}
+
+/** Synthetic demo dataset — no file server; same idea as demo/neural1 bio recording. */
+export async function loadBuiltinDataset(name: string): Promise<void> {
+    const spec = BUILTIN_DATASET_SPECS[name];
+    if (!spec) throw new Error(`Unknown built-in experiment: ${name}`);
+
+    await ensureHFDatasetsReady();
+    await pyodide!.runPythonAsync(`
+import numpy as _np
+from datasets import Dataset as _Dataset
+
+_rng = _np.random.default_rng(${spec.seed})
+_rows = []
+for _ in range(${spec.n_rows}):
+    _n = int(_rng.integers(12, 35))
+    _it = _rng.integers(0, ${spec.n_neurons}, size=_n).astype(_np.int32).tolist()
+    _tt = _rng.uniform(0, ${spec.duration}, size=_n).astype(_np.float32).tolist()
+    _rows.append({
+        'duration': ${spec.duration},
+        'it': _it,
+        'tt': _tt,
+        'iv': [],
+        'vv': [],
+    })
+loaded_dataset = _Dataset.from_list(_rows)
+print(f"loaded_dataset ready: {loaded_dataset.num_rows} rows, features: {list(loaded_dataset.features)}")
+`);
+}
+
 export async function loadHFDataset(
     name: string,
     expPath: string,
@@ -251,28 +300,31 @@ export async function loadHFDataset(
         py.FS.writeFile(`${fsDir}/${file}`, bytes);
     }
 
-    // 3. Ensure pyarrow and xxhash prebuilt packages are loaded
-    await py.loadPackage(['pyarrow', 'xxhash', 'lzma']);
+    await ensureHFDatasetsReady();
 
-    // 4. Install datasets if not already done (lazy, first-use only)
-    if (!datasetsInstalled) {
-        await py.runPythonAsync(`
-import micropip
-await micropip.install('datasets')
-`);
-        datasetsInstalled = true;
-    }
-
-    // 5. Load from disk — patch out ThreadPoolExecutor first (Pyodide has no threads)
+    // Load from disk — patch out ThreadPoolExecutor first (Pyodide has no threads)
     await py.runPythonAsync(`
-import tqdm.contrib.concurrent as _tcc
-_tcc.thread_map = lambda fn, *iters, **kw: list(map(fn, *iters))
-
 import datasets as _ds
 loaded_dataset = _ds.load_from_disk(${JSON.stringify(fsDir)})
 print(f"loaded_dataset ready: {loaded_dataset.num_rows} rows, features: {list(loaded_dataset.features)}")
-del _ds, _tcc
 `);
+}
+
+export function isBuiltinExperiment(exp: { kind?: string; root: string }): boolean {
+    return exp.kind === 'builtin' || exp.root === 'built-in';
+}
+
+export async function loadExperimentDataset(exp: {
+    name: string;
+    path: string;
+    kind?: string;
+    root: string;
+}): Promise<void> {
+    if (isBuiltinExperiment(exp)) {
+        await loadBuiltinDataset(exp.name);
+    } else {
+        await loadHFDataset(exp.name, exp.path, '');
+    }
 }
 
 export type RowData = {

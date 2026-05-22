@@ -1,19 +1,20 @@
 <script lang="ts">
     import { datasetLoading, datasetError } from '$lib/stores';
-    import { loadHFDataset } from '$lib/pyodide';
-    import type { Experiment } from '$lib/types';
+    import { loadExperimentDataset } from '$lib/pyodide';
+    import type { Experiment, ExpMeta } from '$lib/types';
 
     const FILE_SERVER = '';
 
     interface Props { onSelect?: (exp: Experiment) => void; }
     let { onSelect }: Props = $props();
 
-    // Built-in experiments always shown regardless of server state
+    // Built-in experiments: synthetic data in Pyodide (no file server), like demo/neural1
     const BUILTIN_EXPERIMENTS: Experiment[] = [
         {
             name: 'EI1_spikes',
             root: 'built-in',
-            path: '/Users/hexuan/Work/livn/livn_experiments/EI1_spikes',
+            path: '',
+            kind: 'builtin',
             created_at: null,
             n_shards: 3,
             metadata: {
@@ -91,19 +92,24 @@
         return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
     }
 
+    function expKey(exp: Experiment): string {
+        return exp.kind === 'builtin' ? `builtin:${exp.name}` : exp.path;
+    }
+
     async function selectExperiment(exp: Experiment) {
         if (loadingPath) return;
-        loadingPath = exp.path;
+        const key = expKey(exp);
+        loadingPath = key;
         datasetLoading.set(true);
         datasetError.set(null);
-        cardErrors = { ...cardErrors, [exp.path]: '' };
+        cardErrors = { ...cardErrors, [key]: '' };
 
         try {
-            await loadHFDataset(exp.name, exp.path, FILE_SERVER);
+            await loadExperimentDataset(exp);
             onSelect?.(exp);
         } catch (e) {
             const msg = (e as Error).message;
-            cardErrors = { ...cardErrors, [exp.path]: msg };
+            cardErrors = { ...cardErrors, [key]: msg };
             datasetError.set(msg);
         } finally {
             loadingPath = null;
@@ -124,7 +130,7 @@
             {#each BUILTIN_EXPERIMENTS as exp (exp.name)}
                 <div
                     class="card builtin"
-                    class:loading={loadingPath === exp.path}
+                    class:loading={loadingPath === expKey(exp)}
                     role="button"
                     tabindex="0"
                     onclick={() => selectExperiment(exp)}
@@ -155,8 +161,8 @@
                     <div class="card-footer">
                         <span class="tag">{exp.n_shards} {exp.n_shards === 1 ? 'shard' : 'shards'}</span>
                     </div>
-                    {#if cardErrors[exp.path]}
-                        <div class="card-error">{cardErrors[exp.path]}</div>
+                    {#if cardErrors[expKey(exp)]}
+                        <div class="card-error">{cardErrors[expKey(exp)]}</div>
                     {/if}
                 </div>
             {/each}
@@ -179,7 +185,7 @@
                     {#each exps as exp (exp.path)}
                         <div
                             class="card"
-                            class:loading={loadingPath === exp.path}
+                            class:loading={loadingPath === expKey(exp)}
                             role="button"
                             tabindex="0"
                             onclick={() => selectExperiment(exp)}
@@ -214,8 +220,8 @@
                                     <span class="date">{formatDate(exp.created_at)}</span>
                                 {/if}
                             </div>
-                            {#if cardErrors[exp.path]}
-                                <div class="card-error">{cardErrors[exp.path]}</div>
+                            {#if cardErrors[expKey(exp)]}
+                                <div class="card-error">{cardErrors[expKey(exp)]}</div>
                             {/if}
                         </div>
                     {/each}

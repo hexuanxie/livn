@@ -77,4 +77,6 @@ export type Experiment = {
     created_at: string | null;
     n_shards: number;
     metadata: ExpMeta | null;
+    /** Built-ins are generated in-browser; server experiments load from disk via the file server. */
+    kind?: 'builtin' | 'server';
 };
