@@ -51,24 +51,45 @@
         localStorage.setItem(LS_KEY, JSON.stringify(recs));
     }
 
+    async function loadServerExperiments() {
+        fetching = true;
+        fetchError = null;
+        try {
+            const r = await fetch(`${FILE_SERVER}/experiments`);
+            if (r.status === 404) {
+                serverExperiments = [];
+                return;
+            }
+            const text = await r.text();
+            // Static Apache hosts often rewrite unknown URLs to index.html (HTML, not JSON)
+            if (!text.trim() || text.trimStart().startsWith('<')) {
+                serverExperiments = [];
+                return;
+            }
+            let data: unknown;
+            try {
+                data = JSON.parse(text);
+            } catch {
+                serverExperiments = [];
+                return;
+            }
+            if (!r.ok) {
+                const msg =
+                    typeof data === 'object' && data && 'error' in data
+                        ? String((data as { error: unknown }).error)
+                        : `HTTP ${r.status}`;
+                throw new Error(msg);
+            }
+            serverExperiments = Array.isArray(data) ? (data as Experiment[]) : [];
+        } catch (e) {
+            fetchError = (e as Error).message;
+        } finally {
+            fetching = false;
+        }
+    }
+
     $effect(() => {
-        fetch(`${FILE_SERVER}/experiments`)
-            .then(r => {
-                if (r.status === 404) {
-                    serverExperiments = [];
-                    return;
-                }
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then(data => {
-                if (data) serverExperiments = data;
-                fetching = false;
-            })
-            .catch(e => {
-                fetchError = e.message;
-                fetching = false;
-            });
+        void loadServerExperiments();
     });
 
     const serverByRoot = $derived.by(() => {

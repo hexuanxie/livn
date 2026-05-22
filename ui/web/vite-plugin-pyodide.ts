@@ -89,12 +89,38 @@ export function copyPyodidePlugin(): Plugin {
         name: 'copy-pyodide-assets',
 
         configureServer(server) {
-            // Pre-cache bootstrap wheels so micropip/numpy load without a live CDN hop.
-            void Promise.all(bootstrapWheels.map((f) => ensureWheelCached(wheelDir, f))).catch((err) => {
-                console.warn('[pyodide] wheel pre-cache failed:', err);
-            });
+            attachPyodideMiddleware(server.middlewares, pyodideDir, wheelDir, bootstrapWheels);
+        },
 
-            server.middlewares.use('/pyodide', (req, res, next) => {
+        configurePreviewServer(server) {
+            attachPyodideMiddleware(server.middlewares, pyodideDir, wheelDir, bootstrapWheels);
+        },
+
+        async writeBundle(options) {
+            const outDir = options.dir ?? 'build';
+            const dest = join(outDir, 'pyodide');
+            mkdirSync(dest, { recursive: true });
+            for (const name of LOCAL_ASSETS) {
+                copyFileSync(join(pyodideDir, name), join(dest, name));
+            }
+            for (const wheel of bootstrapWheels) {
+                await ensureWheelCached(dest, wheel);
+            }
+        }
+    };
+}
+
+function attachPyodideMiddleware(
+    middlewares: Connect.Server,
+    pyodideDir: string,
+    wheelDir: string,
+    bootstrapWheels: string[]
+): void {
+    void Promise.all(bootstrapWheels.map((f) => ensureWheelCached(wheelDir, f))).catch((err) => {
+        console.warn('[pyodide] wheel pre-cache failed:', err);
+    });
+
+    middlewares.use('/pyodide', (req, res, next) => {
                 void (async () => {
                     const file = (req.url ?? '/').replace(/^\//, '').split('?')[0];
                     if (!file) {
@@ -129,18 +155,4 @@ export function copyPyodidePlugin(): Plugin {
                     }
                 })();
             });
-        },
-
-        async writeBundle(options) {
-            const outDir = options.dir ?? 'build';
-            const dest = join(outDir, 'pyodide');
-            mkdirSync(dest, { recursive: true });
-            for (const name of LOCAL_ASSETS) {
-                copyFileSync(join(pyodideDir, name), join(dest, name));
-            }
-            for (const wheel of bootstrapWheels) {
-                await ensureWheelCached(dest, wheel);
-            }
-        }
-    };
 }

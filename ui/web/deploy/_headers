@@ -1,0 +1,14 @@
+# Netlify / Cloudflare Pages (copy to site root if needed — not included in publish output)
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+/pyodide/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp
+
+/*.wasm
+  Content-Type: application/wasm
+
+/*.whl
+  Content-Type: application/zip

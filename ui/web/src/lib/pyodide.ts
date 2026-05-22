@@ -30,9 +30,14 @@ async function _initPyodide(onLog: (msg: string) => void): Promise<void> {
 
     onLog('Loading Pyodide runtime…');
 
-    // Cache pyodide assets in production only (dev uses Vite wheel proxy; SW can mask 502s)
+    // Production: SW fixes wrong .wasm MIME on static hosts; wait until active before fetch.
     if (import.meta.env.PROD && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(() => { });
+        try {
+            await navigator.serviceWorker.register('/sw.js');
+            await navigator.serviceWorker.ready;
+        } catch {
+            /* continue without SW */
+        }
     }
 
     pyodide = await _loadPyodide({

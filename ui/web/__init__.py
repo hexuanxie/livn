@@ -10,6 +10,16 @@ _WEB_DIR = os.path.dirname(__file__)
 _REPO_ROOT = os.path.dirname(os.path.dirname(_WEB_DIR))
 _BUILD_DIR = os.path.join(_WEB_DIR, "build")
 _DEFAULT_PUBLISH_DIR = os.path.join(_REPO_ROOT, "dist", "livn-ui")
+_HTACCESS_TEMPLATE = os.path.join(_WEB_DIR, "deploy", "htaccess")
+
+
+def _install_apache_htaccess(target_dir: str) -> str:
+    """Write .htaccess into a built/published directory (Apache MIME + SPA fallback)."""
+    if not os.path.isfile(_HTACCESS_TEMPLATE):
+        raise FileNotFoundError(f"Missing Apache template: {_HTACCESS_TEMPLATE}")
+    dest = os.path.join(target_dir, ".htaccess")
+    shutil.copy2(_HTACCESS_TEMPLATE, dest)
+    return dest
 
 
 class Web(Interface):
@@ -71,15 +81,24 @@ class Web(Interface):
         if not os.path.isdir(_BUILD_DIR):
             raise RuntimeError(f"Vite build did not produce {_BUILD_DIR}")
 
+        htaccess_build = _install_apache_htaccess(_BUILD_DIR)
+        print(f"Wrote {htaccess_build}")
+
         dest = os.path.abspath(self.config.output_dir or _DEFAULT_PUBLISH_DIR)
         if os.path.exists(dest):
             shutil.rmtree(dest)
         shutil.copytree(_BUILD_DIR, dest)
+        htaccess_dest = _install_apache_htaccess(dest)
+        print(f"Wrote {htaccess_dest}")
 
         print(f"Static site published to {dest}")
         print(
             "Upload this directory to any static web host "
             "(nginx, Apache, S3, GitHub Pages, etc.)."
+        )
+        print(
+            "If Pyodide stays on 'Initializing environment', ensure .wasm is served as "
+            "application/wasm (see ui/web/deploy/README.md)."
         )
         print(
             "API features (/experiments, /bio-api, /hsds) need the livn UI server "

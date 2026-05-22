@@ -1,0 +1,33 @@
+# livn UI — Apache configuration (copied to site root on build)
+# Canonical copy: ui/web/deploy/htaccess
+
+<IfModule mod_mime.c>
+    AddType application/wasm wasm
+    AddType application/javascript js mjs
+    AddType application/zip whl zip
+</IfModule>
+
+<FilesMatch "\.wasm$">
+    <IfModule mod_headers.c>
+        Header set Content-Type "application/wasm"
+    </IfModule>
+</FilesMatch>
+
+<IfModule mod_headers.c>
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    Header always set Cross-Origin-Embedder-Policy "require-corp"
+</IfModule>
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} !^/pyodide/ [NC]
+    RewriteCond %{REQUEST_URI} !^/experiments$ [NC]
+    RewriteCond %{REQUEST_URI} !^/bio-api/ [NC]
+    RewriteCond %{REQUEST_URI} !^/dataset_manifest [NC]
+    RewriteCond %{REQUEST_URI} !^/dataset_file [NC]
+    RewriteCond %{REQUEST_URI} !^/files/ [NC]
+    RewriteRule ^ index.html [L]
+</IfModule>

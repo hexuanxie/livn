@@ -1,0 +1,36 @@
+# livn UI — Apache configuration (deployed as .htaccess in the site root)
+#
+# Required for Pyodide: .wasm must be application/wasm (not text/x-asm).
+
+<IfModule mod_mime.c>
+    AddType application/wasm wasm
+    AddType application/javascript js mjs
+    AddType application/zip whl zip
+</IfModule>
+
+<FilesMatch "\.wasm$">
+    <IfModule mod_headers.c>
+        Header set Content-Type "application/wasm"
+    </IfModule>
+</FilesMatch>
+
+# SharedArrayBuffer / Pyodide
+<IfModule mod_headers.c>
+    Header always set Cross-Origin-Opener-Policy "same-origin"
+    Header always set Cross-Origin-Embedder-Policy "require-corp"
+</IfModule>
+
+# SvelteKit SPA: serve index.html for client-side routes
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteBase /
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} !^/pyodide/ [NC]
+    RewriteCond %{REQUEST_URI} !^/experiments$ [NC]
+    RewriteCond %{REQUEST_URI} !^/bio-api/ [NC]
+    RewriteCond %{REQUEST_URI} !^/dataset_manifest [NC]
+    RewriteCond %{REQUEST_URI} !^/dataset_file [NC]
+    RewriteCond %{REQUEST_URI} !^/files/ [NC]
+    RewriteRule ^ index.html [L]
+</IfModule>
