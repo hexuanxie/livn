@@ -132,6 +132,7 @@ class Env(EnvProtocol):
         self.comm = comm
         self.subworld_size = subworld_size
 
+        self.duration = None
         self.encoding = None
         self.decoding = None
 
@@ -168,6 +169,7 @@ class Env(EnvProtocol):
         self.template_dict = {}
 
         self._flucts = {}
+        self._noise_state: dict = {}
 
         # --- Simulator
         self.template_directory = self.model.neuron_template_directory()
@@ -218,6 +220,13 @@ class Env(EnvProtocol):
         self._opsin_stimulus_vectors: dict[tuple[int, int], dict] = {}
         self._opsin_callback_registered = False
         self._opsin_step_index = 0
+
+        # Refractory spike-source filters (gid -> dict with 'filter', 'in_nc', 'out_nc')
+        self._spike_filter_refs: dict[int, dict] = {}
+        if hasattr(self.model, "neuron_refractory_period"):
+            self._refractory_period = float(self.model.neuron_refractory_period())
+        else:
+            self._refractory_period = 2.0
 
     @property
     def voltage_recording_dt(self) -> float:
@@ -301,6 +310,13 @@ class Env(EnvProtocol):
 
         self.model.neuron_celltypes(celltypes)
 
+        ignored = set()
+        if hasattr(self.model, "ignored_populations"):
+            ignored = set(self.model.ignored_populations())
+        for k in list(celltypes.keys()):
+            if k in ignored:
+                del celltypes[k]
+
         typenames = sorted(celltypes.keys())
         for k in typenames:
             population_range = population_ranges.get(k, None)
@@ -371,6 +387,57 @@ class Env(EnvProtocol):
         self.connectgjstime = time.time() - st
         if rank == 0:
             logger.info(f"*** Gap junctions created in {self.connectgjstime:.02f} s")
+
+    def _install_spike_filter(self, cell) -> None:
+        src_nc = getattr(cell, "spike_detector", None)
+        if src_nc is None:
+            return  # artificial cells / hoc cells without a precomputed detector
+
+        threshold = float(src_nc.threshold)
+        delay = float(src_nc.delay)
+        weight = float(src_nc.weight[0])
+
+        # Locate the soma section the original detector watched
+        soma_sec = None
+        soma_attr = getattr(cell, "soma", None)
+        if soma_attr:
+            soma_node = soma_attr[0] if isinstance(soma_attr, list) else soma_attr
+            soma_sec = getattr(soma_node, "section", soma_node)
+        if soma_sec is None:
+            hoc_cell = getattr(cell, "hoc_cell", None) or getattr(
+                cell, "cell_obj", None
+            )
+            soma_sec = getattr(hoc_cell, "soma", None)
+            if isinstance(soma_sec, list):
+                soma_sec = soma_sec[0]
+        if soma_sec is None:
+            raise RuntimeError(
+                f"_install_spike_filter: cannot find soma section for gid {cell.gid}"
+            )
+
+        spike_filter = h.SpikeFilter()
+        spike_filter.tref = float(self._refractory_period)
+
+        in_nc = h.NetCon(soma_sec(0.5)._ref_v, spike_filter, sec=soma_sec)
+        in_nc.threshold = threshold
+        in_nc.delay = delay
+        in_nc.weight[0] = weight
+
+        out_nc = h.NetCon(spike_filter, None)
+        out_nc.delay = max(2.0 * 0.025, 1e-3)
+        out_nc.weight[0] = 1.0
+
+        # Replace the cell's detector so register_cell binds pc.cell /
+        # pc.spike_record to the filtered output instead of the raw threshold
+        # NetCon. The original src_nc loses its only Python ref and is GC'd,
+        # which detaches its watch on _ref_v
+        cell.spike_detector = out_nc
+
+        self._spike_filter_refs[int(cell.gid)] = {
+            "filter": spike_filter,
+            "in_nc": in_nc,
+            "out_nc": out_nc,
+        }
 
     def _make_cells(self, cell_selection=None):
         rank = self.rank
@@ -506,6 +573,7 @@ class Env(EnvProtocol):
                     soma_xyz = cells.get_soma_xyz(tree, self.SWC_Types)
                     cell.position(soma_xyz[0], soma_xyz[1], soma_xyz[2])
 
+                    self._install_spike_filter(cell)
                     cells.register_cell(compat, pop_name, gid, cell)
                     num_cells += 1
                 del trees
@@ -574,6 +642,7 @@ class Env(EnvProtocol):
                     else:
                         cell = cells.make_hoc_cell(compat, pop_name, gid)
                     cell.position(cell_x, cell_y, cell_z)
+                    self._install_spike_filter(cell)
                     cells.register_cell(compat, pop_name, gid, cell)
                     num_cells += 1
             else:
@@ -591,6 +660,12 @@ class Env(EnvProtocol):
             )
 
         self.node_allocation = set(self.gidset)
+
+        if self.rank == 0 and self._spike_filter_refs:
+            logger.info(
+                f"*** SpikeFilter installed on {len(self._spike_filter_refs)} cells "
+                f"(tref = {self._refractory_period:.2f} ms)"
+            )
 
     def _load_connections(self):
         synapses = self.system.connections_config["synapses"]
@@ -624,6 +699,16 @@ class Env(EnvProtocol):
             logger.info(f"projection_dict = {str(projection_dict)}")
         projection_dict = self.comm.bcast(projection_dict, root=0)
         comm0.Free()
+
+        ignored = set()
+        if hasattr(self.model, "ignored_populations"):
+            ignored = set(self.model.ignored_populations())
+        if ignored:
+            projection_dict = {
+                dst: [src for src in srcs if src not in ignored]
+                for dst, srcs in projection_dict.items()
+                if dst not in ignored
+            }
 
         self.input_sources = {
             pop_name: set() for pop_name in self.cells_meta_data["celltypes"].keys()
@@ -698,6 +783,7 @@ class Env(EnvProtocol):
         dt: float | None = None,
         **kwargs,
     ):
+        self.duration = duration
         current_time = self.t
 
         if stimulus is not None:
@@ -712,9 +798,9 @@ class Env(EnvProtocol):
 
         if stimulus is not None and not is_irradiance:
             if stimulus.gids is None:
-                stimulus.gids = self.system.gids
+                stimulus.gids = self.active_gids()
 
-            sections_per_neuron = len(stimulus) // len(self.system.neuron_coordinates)
+            sections_per_neuron = len(stimulus) // len(self.active_neuron_coordinates())
 
             start_step = int(round(current_time / stimulus.dt))
             if not math.isclose(
@@ -730,7 +816,19 @@ class Env(EnvProtocol):
 
                 section_id = count % sections_per_neuron
 
-                cell = self.pc.gid2cell(gid)
+                # pc.gid2cell returns the source object of the NetCon
+                # registered with pc.cell. For biophysical cells we wrap
+                # the somatic detector in a SpikeFilter ARTIFICIAL_CELL
+                # (see _install_spike_filter), so gid2cell would return
+                # the filter rather than the biophys cell. Look up the
+                # underlying cell via self.cells instead
+                cell = None
+                for pop_cells in self.cells.values():
+                    if gid in pop_cells:
+                        cell = pop_cells[gid]
+                        break
+                if cell is None:
+                    cell = self.pc.gid2cell(gid)
                 if "VecStim" in getattr(cell, "hname", lambda: "")():
                     # artificial STIM cell
                     print(
@@ -826,6 +924,31 @@ class Env(EnvProtocol):
             h.secondorder = 2  # crank-nicholson
             h.dt = requested_dt
             self.pc.timeout(600.0)
+            # Mirror each cell template's init_ic(V_rest): when the
+            # template defines that method, evaluate it so the
+            # constant mechanism's `ic_constant` pins the soma at
+            # the per-celltype resting potential.  This must run before
+            # the final finitialize because init_ic itself calls
+            # h.finitialize internally
+            for pop_name, pop_cells in self.biophys_cells.items():
+                celltype_cfg = self.celltypes.get(pop_name, {})
+                mech_cfg = celltype_cfg.get("mechanism", {})
+                v_rest = None
+                for mech_params in mech_cfg.values():
+                    if isinstance(mech_params, dict) and "V_rest" in mech_params:
+                        v_rest = float(mech_params["V_rest"])
+                        break
+                if v_rest is None:
+                    continue
+                for gid, cell in pop_cells.items():
+                    target = getattr(cell, "hoc_cell", None) or getattr(
+                        cell, "cell_obj", None
+                    )
+                    if target is None:
+                        target = cell
+                    init_ic = getattr(target, "init_ic", None)
+                    if callable(init_ic):
+                        init_ic(v_rest)
             h.finitialize(h.v_init)
             h.finitialize(h.v_init)
             if verbose:
@@ -880,7 +1003,7 @@ class Env(EnvProtocol):
         if len(self.i_recs) == 0:
             return ii, tt, iv, v, None, None
 
-        gids = self.system.gids
+        gids = self.active_gids()
         sections_per_neuron = len(self.i_recs) // len(gids)
         gid_to_index = {int(g): idx for idx, g in enumerate(gids)}
         any_rec = next(iter(self.i_recs.values()))
@@ -893,11 +1016,10 @@ class Env(EnvProtocol):
             if idx is None:
                 continue
             arr = rec.as_numpy()
-            # Convert current density (mA/cm^2) to absolute current (μA):
-            # I_μA = (i_membrane_mA_per_cm2) * (area_cm2) * 1000
-            area_cm2 = float(self.i_area.get((int(gid), sec_id), 0.0))
-            if area_cm2 > 0.0:
-                arr = arr * area_cm2 * 1000.0
+            # i_membrane_ with cvode.use_fast_imem(1) is the absolute
+            # transmembrane current per segment in nA, not a current
+            # density so we convert to microamperes
+            arr = arr * 1e-3
             if len(arr) != T:
                 # pad or truncate to T
                 if len(arr) < T:
@@ -908,6 +1030,8 @@ class Env(EnvProtocol):
                     arr = arr[:T]
             currents[idx * sections_per_neuron + sec_id, :] = arr
             im[idx * sections_per_neuron + sec_id] = gid
+
+        self.duration = None
 
         return ii, tt, iv, v, im, currents
 
@@ -967,9 +1091,9 @@ class Env(EnvProtocol):
         phi_stimulus = stimulus.convert_to("photon_flux")
 
         if phi_stimulus.gids is None:
-            phi_stimulus.gids = self.system.gids
+            phi_stimulus.gids = self.active_gids()
 
-        sections_per_neuron = len(phi_stimulus) // len(self.system.neuron_coordinates)
+        sections_per_neuron = len(phi_stimulus) // len(self.active_neuron_coordinates())
 
         start_step = int(round(current_time / phi_stimulus.dt))
 
@@ -1074,11 +1198,16 @@ class Env(EnvProtocol):
 
     def set_weights(self, weights):
         params = []
+        dropped = []
         for k, v in weights.items():
             try:
                 params.append((SynapticParam.from_string(k), v))
-            except ValueError:
-                pass
+            except ValueError as e:
+                dropped.append((k, str(e)))
+        if dropped and self.rank == 0:
+            print(
+                f"[set_weights] dropped {len(dropped)} keys: {dropped[:3]}", flush=True
+            )
 
         self.this.__dict__.update({"phenotype_dict": {}, "cache_queries": True})
         update_network_params(self.this, params)
@@ -1088,8 +1217,16 @@ class Env(EnvProtocol):
     def set_noise(self, noise: dict):
         if not hasattr(self.model, "neuron_noise_mechanism"):
             if self.rank == 0:
-                print(f"Model {self.model} does not support noise setter")
+                print(
+                    f"[set_noise] Model {self.model} does not support noise setter, skipping {len(noise)} params",
+                    flush=True,
+                )
             return self
+
+        # Merge with previously-applied noise so partial updates do not
+        # silently reset unspecified parameters to function defaults
+        self._noise_state.update(noise)
+        merged = dict(self._noise_state)
 
         for population, pop_cells in self.cells.items():
             for gid, cell in pop_cells.items():
@@ -1105,7 +1242,9 @@ class Env(EnvProtocol):
                         fluct, state = self.model.neuron_noise_mechanism(sec(0.5))
                         self._flucts[f"{gid}-{idx}"] = (fluct, state)
 
-                    self.model.neuron_noise_configure(population, fluct, state, **noise)
+                    self.model.neuron_noise_configure(
+                        population, fluct, state, **merged
+                    )
 
                     h.pop_section()
 
@@ -1829,6 +1968,10 @@ class Env(EnvProtocol):
         stim_vectors = getattr(self, "_stimulus_vectors", None)
         if stim_vectors is not None:
             stim_vectors.clear()
+
+        spike_filter_refs = getattr(self, "_spike_filter_refs", None)
+        if spike_filter_refs is not None:
+            spike_filter_refs.clear()
 
         gidset = getattr(self, "gidset", None)
         if gidset is not None:

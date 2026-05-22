@@ -103,8 +103,13 @@ class Env(EnvProtocol):
         return self
 
     def _load_cells(self):
+        ignored = set()
+        if hasattr(self.model, "ignored_populations"):
+            ignored = set(self.model.ignored_populations())
         population_ranges = self.system.cells_meta_data.population_ranges
         for population_name in self.system.cells_meta_data.population_names:
+            if population_name in ignored:
+                continue
             n = self.system.cells_meta_data.population_count(population_name)
             offset = population_ranges[population_name][0]
 
@@ -128,8 +133,15 @@ class Env(EnvProtocol):
         return self
 
     def _load_connections(self):
+        ignored = set()
+        if hasattr(self.model, "ignored_populations"):
+            ignored = set(self.model.ignored_populations())
         for post, v in self.system.connections_config["synapses"].items():
+            if post in ignored:
+                continue
             for pre, synapse in v.items():
+                if pre in ignored:
+                    continue
                 population_ranges = self.system.cells_meta_data.population_ranges
 
                 # Build connectivity arrays
@@ -289,7 +301,7 @@ class Env(EnvProtocol):
 
     def record_spikes(self, population: str | list | tuple | None = None):
         if population is None:
-            population = self.system.populations
+            population = self.active_populations()
         if isinstance(population, (list, tuple)):
             for p in population:
                 self.record_spikes(p)
@@ -306,7 +318,7 @@ class Env(EnvProtocol):
         self, population: str | list | tuple | None = None, dt: float = 0.1
     ):
         if population is None:
-            population = self.system.populations
+            population = self.active_populations()
         if isinstance(population, (list, tuple)):
             for p in population:
                 self.record_voltage(p, dt=dt)
@@ -448,8 +460,8 @@ class Env(EnvProtocol):
         if len(self._membrane_monitors) == 0:
             return concat(ii), concat(tt), concat(gids), concat(vv), None, None
 
-        # [T, n_neurons] matrix aligned to system.neuron_coordinates
-        coords = getattr(self.system, "neuron_coordinates", None)
+        # [T, n_neurons] matrix aligned to active neuron coordinates
+        coords = self.active_neuron_coordinates()
         if coords is None or len(coords) == 0:
             return concat(ii), concat(tt), concat(gids), concat(vv), None, None
 
@@ -472,8 +484,21 @@ class Env(EnvProtocol):
             if isinstance(monitor, tuple):
                 # Two-compartment: (monitor_soma, monitor_dend)
                 mon_s, mon_d = monitor
-                data_s = np.array(mon_s.I_memb_s[:, start_idx:])
-                data_d = np.array(mon_d.I_memb_d[:, start_idx:])
+                # I_memb_s/I_memb_d are current densities (mA/cm^2)
+                # in the brian2 equations; convert to absolute current per
+                # section in microamperes (I[uA] = density * area_cm2 * 1e3)
+                # to follow the convention
+                pop = mon_s.source
+                area_s_cm2 = float(getattr(pop, "area_soma_cm2", 0.0))
+                area_d_cm2 = float(getattr(pop, "area_dend_cm2", 0.0))
+                if area_s_cm2 <= 0.0 or area_d_cm2 <= 0.0:
+                    raise RuntimeError(
+                        f"brian2 population {population!r} is missing "
+                        "area_soma_cm2/area_dend_cm2 attributes required "
+                        "to convert I_memb_* (mA/cm^2) to uA"
+                    )
+                data_s = np.array(mon_s.I_memb_s[:, start_idx:]) * (area_s_cm2 * 1000.0)
+                data_d = np.array(mon_d.I_memb_d[:, start_idx:]) * (area_d_cm2 * 1000.0)
                 per_pop_data[population] = (data_s, data_d)
                 lengths.append(data_s.shape[1] if data_s.ndim == 2 else 0)
             else:

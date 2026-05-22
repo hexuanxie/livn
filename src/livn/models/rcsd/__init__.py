@@ -18,6 +18,37 @@ else:
 
 
 class ReducedCalciumSomaDendrite(Model):
+    def __init__(
+        self,
+        input_mode: str | None = None,
+        refractory_period: float = 2.0,
+        implicit_inhibition: bool = True,
+    ):
+        # Optional override for the underlying neuron's stimulus
+        # interpretation; this is only needed for the JAX
+        # backend that build the compute graph at
+        # compile time
+        if input_mode is not None and input_mode not in {
+            "current_density",
+            "conductance",
+            "current",
+            "irradiance",
+        }:
+            raise ValueError(
+                f"Unknown input_mode {input_mode!r}; expected one of "
+                f"'current_density', 'conductance', 'current', 'irradiance'."
+            )
+        self.input_mode = input_mode
+        if refractory_period < 0:
+            raise ValueError(f"refractory_period must be >= 0, got {refractory_period}")
+        self.refractory_period = float(refractory_period)
+        self.implicit_inhibition = bool(implicit_inhibition)
+
+    def ignored_populations(self) -> set[str]:
+        if self.implicit_inhibition:
+            return {"INH"}
+        return set()
+
     def prepare_stimulus(self, stimulus):
         modes = {
             "extracellular",
@@ -84,10 +115,20 @@ class ReducedCalciumSomaDendrite(Model):
     ) -> types.Float[types.Array, "n_stim_coords ixyz=4"]:
         return self.stimulus_coordinates(neuron_coordinates, population=population)
 
+    def expand_stimulus_currents(
+        self,
+        currents: types.Float[types.Array, "batch timestep n_neurons"],
+    ) -> types.Float[types.Array, "batch timestep n_stimulus_coords"]:
+        """Interleave [soma_curr, 0, soma_curr, 0, ...] for BRK soma-only drive."""
+        zeros = np.zeros_like(currents)
+        stacked = np.stack([currents, zeros], axis=-1)  # [..., n_neurons, 2]
+        new_shape = currents.shape[:-1] + (currents.shape[-1] * 2,)
+        return stacked.reshape(new_shape)
+
     # neuron
 
     def params(self, name: str):
-        return {
+        base = {
             "BoothRinzelKiehn-MN": {
                 "Ltotal": 120.0,
                 "dend_alpha_Caconc": 1,
@@ -111,7 +152,6 @@ class ReducedCalciumSomaDendrite(Model):
                 "soma_gmax_K": 0.10458818,
                 "soma_gmax_KCa": 0.005655824,
                 "soma_gmax_Na": 0.11399703,
-                "ic_constant": -0.015656504661833687,
                 "V_rest": -57.4,
                 "V_threshold": -37.0,
             },
@@ -136,12 +176,18 @@ class ReducedCalciumSomaDendrite(Model):
                 "V_threshold": -37.0,
             },
         }[name]
+        if self.input_mode is not None:
+            base = {**base, "input_mode": self.input_mode}
+        return base
 
     def neuron_template_directory(self):
         return os.path.join(os.path.dirname(__file__), "neuron", "templates")
 
     def neuron_mechanisms_directory(self):
         return os.path.join(os.path.dirname(__file__), "neuron", "mechanisms")
+
+    def neuron_refractory_period(self) -> float:
+        return self.refractory_period
 
     def neuron_celltypes(self, celltypes):
         if "EXC" in celltypes:
@@ -368,17 +414,35 @@ class ReducedCalciumSomaDendrite(Model):
                 "tau_e": 33.00786209106445,
                 "tau_i": 28.50772476196289,
             },
+            "E1": {
+                "g_e0": 7.111820697784424,
+                "g_i0": 1.4761981964111328,
+                "std_e": 0.20595668256282806,
+                "std_i": 0.3790721297264099,
+                "tau_e": 31.166749954223633,
+                "tau_i": 5.819411277770996,
+            },
             "EI2": {
-                "g_e0": 1.4662606716156006,
-                "g_i0": 0.9061993360519409,
-                "std_e": 0.47152602672576904,
-                "std_i": 0.1969195306301117,
-                "tau_e": 17.493135452270508,
-                "tau_i": 7.105101585388184,
+                "g_e0": 3.409418821334839,
+                "g_i0": 1.0573457479476929,
+                "std_e": 0.49486637115478516,
+                "std_i": 0.23988725244998932,
+                "tau_e": 31.219661712646484,
+                "tau_i": 16.700607299804688,
+            },
+            "E2": {
+                "g_e0": 2.9937374591827393,
+                "g_i0": 1.3689101934432983,
+                "std_e": 0.3047086000442505,
+                "std_i": 0.3421246111392975,
+                "tau_e": 10.197466850280762,
+                "tau_i": 12.741419792175293,
             },
             "EI3": {},
+            "E3": {},
             "EI4": {},
-        }[system]
+            "E4": {},
+        }[system.replace("I", "") if self.implicit_inhibition else system]
 
     def neuron_default_weights(self, system: str):
         return {
@@ -390,17 +454,27 @@ class ReducedCalciumSomaDendrite(Model):
                 "INH_EXC-soma-GABA_A-weight": 9.406616405134113,
                 "INH_INH-soma-GABA_A-weight": 8.710510071227473,
             },
-            "EI2": {
+            "E1": {
                 "EXC_EXC-hillock-AMPA-weight": 0.0010000000254350994,
-                "EXC_EXC-hillock-NMDA-weight": 0.00398131980116756,
-                "EXC_INH-hillock-AMPA-weight": 12.114758587424397,
-                "EXC_INH-hillock-NMDA-weight": 0.31300935167465127,
-                "INH_EXC-soma-GABA_A-weight": 0.5000229360632054,
-                "INH_INH-soma-GABA_A-weight": 5.83084802642212,
+                "EXC_EXC-hillock-NMDA-weight": 0.04389299160615967,
+            },
+            "EI2": {
+                "EXC_EXC-hillock-AMPA-weight": 0.8598201979147386,
+                "EXC_EXC-hillock-NMDA-weight": 1.2337499089211241,
+                "EXC_INH-hillock-AMPA-weight": 1.1851855878120792,
+                "EXC_INH-hillock-NMDA-weight": 0.056837208512839466,
+                "INH_EXC-soma-GABA_A-weight": 1.5785464331652075,
+                "INH_INH-soma-GABA_A-weight": 4.262910407764182,
+            },
+            "E2": {
+                "EXC_EXC-hillock-AMPA-weight": 1.8472533315670465,
+                "EXC_EXC-hillock-NMDA-weight": 1.8983852905268401,
             },
             "EI3": {},
+            "E3": {},
             "EI4": {},
-        }[system]
+            "E4": {},
+        }[system.replace("I", "") if self.implicit_inhibition else system]
 
     # diffrax
 
@@ -408,7 +482,7 @@ class ReducedCalciumSomaDendrite(Model):
         from livn.models.rcsd.diffrax.culture import MotoneuronCulture
 
         return MotoneuronCulture(
-            num_neurons=len(env.system.gids),
+            num_neurons=len(env.active_gids()),
             params=self.params("BoothRinzelKiehn-MN"),
             key=key,
         )
@@ -956,6 +1030,14 @@ class ReducedCalciumSomaDendrite(Model):
             population.E_Na = 50.0
             population.E_K = -77.0
 
+            _diam = p["global_diam"]
+            _Ltot = p["Ltotal"]
+            _pp = p["pp"]
+            population.add_attribute("area_soma_cm2")
+            population.add_attribute("area_dend_cm2")
+            population.area_soma_cm2 = _m.pi * _diam * (_pp * _Ltot) * 1e-8
+            population.area_dend_cm2 = _m.pi * _diam * ((1 - _pp) * _Ltot) * 1e-8
+
         else:
             # INH = Pinsky-Rinzel
             p = self.params("PinskyRinzel-PVBC")
@@ -1120,6 +1202,14 @@ class ReducedCalciumSomaDendrite(Model):
 
             population.E_Na = 50.0
             population.E_K = -77.0
+
+            _diam = p["global_diam"]
+            _Ltot = p["Ltotal"]
+            _pp = p["pp"]
+            population.add_attribute("area_soma_cm2")
+            population.add_attribute("area_dend_cm2")
+            population.area_soma_cm2 = _m.pi * _diam * (_pp * _Ltot) * 1e-8
+            population.area_dend_cm2 = _m.pi * _diam * ((1 - _pp) * _Ltot) * 1e-8
 
         # Common: noise init
         population.g_noise_e = 0.0
