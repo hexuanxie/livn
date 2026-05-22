@@ -75,8 +75,7 @@
             const z = coords[idx + 2];
 
             const lineMat = new LineBasicMaterial({
-                color: new Color("#b8860b"),
-                linewidth: 2,
+                color: new Color("#c17900"),
             });
             const lines = new LineSegments(edgeGeo.clone(), lineMat);
             lines.position.set(x, y, z);
@@ -102,7 +101,7 @@
             const ls = electrodeLines[i];
             const eid = ls.userData.electrodeId;
             const mat = ls.material as LineBasicMaterial;
-            mat.color.set(eid === selId ? "#ffd54f" : "#b8860b");
+            mat.color.set(eid === selId ? "#e65100" : "#c17900");
             mat.needsUpdate = true;
         }
         invalidate();

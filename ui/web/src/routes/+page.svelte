@@ -13,7 +13,14 @@
     import BioRecordingDetail from "$lib/components/BioRecordingDetail.svelte";
     import SystemGenerator from "$lib/components/SystemGenerator.svelte";
     import { viewConfig, envSystem, pendingCommand, pyodideReady, activeExperiment, selectedNeurons, activeExpRow, selectedElectrode } from "$lib/stores";
-    import { loadExpSystem, forceRefresh } from "$lib/pyodide";
+    import {
+        builtinCultureSetupCode,
+        loadBuiltinCulture,
+        loadExpSystem,
+        forceRefresh,
+        isBuiltinExperiment,
+    } from "$lib/pyodide";
+    import { isBuiltinSystemId } from "$lib/cultureGeneration";
     import type { BioRecording, Experiment } from "$lib/types";
 
     let navTab       = $state<'system' | 'data' | 'build'>('system');
@@ -32,12 +39,16 @@
         navPage = 'list';
     }
 
-    function selectSystem(system: string) {
+    async function selectSystem(system: string) {
         navPage   = 'detail';
         navSystem = system;
-        pendingCommand.set(
-            `from livn.env import Env\nfrom livn.system import predefined\nenv = Env(predefined('${system}'))`
-        );
+        if (isBuiltinSystemId(system)) {
+            pendingCommand.set(builtinCultureSetupCode());
+        } else {
+            pendingCommand.set(
+                `from livn.env import Env\nfrom livn.system import predefined\nenv = Env(predefined('${system}'))`
+            );
+        }
     }
 
     async function selectExperiment(exp: Experiment) {
@@ -51,8 +62,12 @@
         const sysName = uri ? uri.replace(/\/$/, '').split('/').pop() : null;
         if (sysName) {
             try {
-                await loadExpSystem(sysName);
-                await forceRefresh();
+                if (isBuiltinExperiment(exp)) {
+                    await loadBuiltinCulture();
+                } else {
+                    await loadExpSystem(sysName);
+                    await forceRefresh();
+                }
             } catch {
                 // ExperimentDataPanel shows warning if system fails to load
             }
@@ -92,6 +107,17 @@
         EI1: 'Circular', EI2: 'Circular', CA1d: 'Rectangular',
     };
 
+    function systemLabel(id: string | null): string {
+        if (!id) return '—';
+        if (isBuiltinSystemId(id)) return 'Demo Culture';
+        return id;
+    }
+
+    function cultureShape(id: string | null): string {
+        if (isBuiltinSystemId(id)) return 'Rectangular';
+        return id ? (SHAPES[id] ?? 'Unknown') : '—';
+    }
+
     function bboxDimensions(bb: Float64Array): string {
         return `${(bb[3]-bb[0]).toFixed(0)} × ${(bb[4]-bb[1]).toFixed(0)} × ${(bb[5]-bb[2]).toFixed(0)} µm`;
     }
@@ -118,7 +144,7 @@
         return out;
     }
 
-    const shape      = $derived(currentSystem ? (SHAPES[currentSystem] ?? 'Unknown') : '—');
+    const shape      = $derived(cultureShape(currentSystem));
     const dimensions = $derived(system ? bboxDimensions(system.bounding_box) : '—');
     const counts     = $derived(system ? popCounts(system.pop_coords) : '—');
     const neurons    = $derived(system ? sampleNeurons(system.pop_coords) : []);
@@ -227,7 +253,7 @@
                 </div>
                 <div class="console-panel">
                     <div class="console-header">
-                        <span class="console-system">{currentSystem ?? '—'}</span>
+                        <span class="console-system">{systemLabel(currentSystem)}</span>
                         <button class="list-btn" onclick={() => { navPage = 'list'; }}>
                             ← Systems
                         </button>
@@ -397,7 +423,7 @@
     .scene-panel {
         position: relative;
         min-height: 0;
-        background: #1a1a2e;
+        background: #e8ecf2;
     }
 
     .console-panel {

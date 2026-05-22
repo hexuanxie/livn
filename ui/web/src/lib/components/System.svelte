@@ -1,9 +1,9 @@
 <script lang="ts">
-    import { T, useThrelte } from "@threlte/core";
+    import { useThrelte } from "@threlte/core";
     import {
         InstancedMesh,
         SphereGeometry,
-        MeshStandardMaterial,
+        MeshBasicMaterial,
         Matrix4,
         Color,
         EdgesGeometry,
@@ -52,13 +52,14 @@
         for (const m of meshes) {
             scene.remove(m);
             m.geometry.dispose();
-            (m.material as MeshStandardMaterial).dispose();
+            (m.material as MeshBasicMaterial).dispose();
         }
         meshes = [];
         popGids = new Map();
 
         const span = getSpan();
-        const radius = span * 0.02 * config.pointSize;
+        // 0.02 was ~80 µm spheres on a 4 mm culture — extreme overlap reads as a black slab
+        const radius = Math.max(span * 0.004 * config.pointSize, 3);
 
         for (const pop of data.populations) {
             if (!config.popVisibility[pop]) continue;
@@ -68,9 +69,10 @@
 
             const count = Math.floor(coords.length / 4);
             const colorHex = POP_COLORS[pop] ?? DEFAULT_COLOR;
-            const geo = new SphereGeometry(radius, 12, 12);
-            const mat = new MeshStandardMaterial({
-                color: new Color(colorHex),
+            const popColor = new Color(colorHex);
+            const geo = new SphereGeometry(radius, 10, 10);
+            const mat = new MeshBasicMaterial({
+                color: popColor,
                 transparent: config.opacity < 1,
                 opacity: config.opacity,
             });
@@ -89,6 +91,7 @@
             }
 
             mesh.instanceMatrix.needsUpdate = true;
+            mesh.frustumCulled = false;
             mesh.computeBoundingBox();
             mesh.computeBoundingSphere();
             mesh.userData = { population: pop };
@@ -128,9 +131,10 @@
         const boxGeo = new BoxGeometry(sx, sy, sz);
         const edges = new EdgesGeometry(boxGeo);
         const lineMat = new LineBasicMaterial({
-            color: 0x666666,
+            color: 0x1565c0,
             transparent: true,
-            opacity: 0.5,
+            opacity: 0.92,
+            depthTest: true,
         });
         bboxLines = new LineSegments(edges, lineMat);
         bboxLines.position.set(cx, cy, cz);
@@ -232,49 +236,53 @@
         tooltip.set({ visible: false, gid: 0, population: '', x: 0, y: 0, z: 0, nearestElectrode: null });
     }
 
-    // Auto-position camera
+    // Auto-position camera to culture center (critical for large built-in cultures)
     function positionCamera() {
         if (!data.bounding_box || data.bounding_box.length < 6) return;
+        const cam = camera.current;
+        if (!cam) return;
         const bb = data.bounding_box;
         const cx = (bb[0] + bb[3]) / 2;
         const cy = (bb[2] + bb[5]) / 2;
         const cz = (bb[1] + bb[4]) / 2;
         const span = getSpan();
-        camera.current.position.set(cx, cy + span * 0.8, cz + span * 1.2);
-        camera.current.lookAt(new Vector3(cx, cy, cz));
+        cam.near = Math.max(span * 0.001, 1);
+        cam.far = span * 80;
+        cam.position.set(cx, cy + span * 0.8, cz + span * 1.2);
+        cam.lookAt(new Vector3(cx, cy, cz));
+        cam.updateProjectionMatrix();
     }
 
     $effect(() => {
-        // Track all config properties + data identity for rebuild
+        // Track system identity + viz settings for rebuild
+        void data.name;
         void data.num_neurons;
+        void data.populations.length;
+        void data.bounding_box?.[0];
+        void data.bounding_box?.[3];
         void config.pointSize;
         void config.opacity;
         void config.showBoundingBox;
         void JSON.stringify(config.popVisibility);
         buildMeshes();
         buildBBox();
+        positionCamera();
         invalidate();
     });
 
-    const SEL_COLOR = new Color('#ffd54f');
-
     $effect(() => {
         const sel = $selectedNeurons;
+        if (sel.length === 0) return;
+        void data.name;
+        void data.num_neurons;
         for (const mesh of meshes) {
             const coords = popGids.get(mesh);
             if (!coords) continue;
             const pop = mesh.userData.population as string;
-            const defColor = new Color(POP_COLORS[pop] ?? DEFAULT_COLOR);
-            const count = Math.floor(coords.length / 4);
-            let changed = false;
-            for (let i = 0; i < count; i++) {
-                const gid = coords[i * 4];
-                mesh.setColorAt(i, sel.includes(gid) ? SEL_COLOR : defColor);
-                changed = true;
-            }
-            if (changed && mesh.instanceColor) {
-                mesh.instanceColor.needsUpdate = true;
-            }
+            const hasSelected = coords.some((_, i) => sel.includes(coords[i * 4]));
+            const mat = mesh.material as MeshBasicMaterial;
+            mat.color.set(hasSelected ? '#ffd54f' : (POP_COLORS[pop] ?? DEFAULT_COLOR));
+            mat.needsUpdate = true;
         }
         invalidate();
     });
@@ -291,7 +299,7 @@
         for (const m of meshes) {
             scene.remove(m);
             m.geometry.dispose();
-            (m.material as MeshStandardMaterial).dispose();
+            (m.material as MeshBasicMaterial).dispose();
         }
         if (bboxLines) {
             scene.remove(bboxLines);

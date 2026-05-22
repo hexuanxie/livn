@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 const sw = self as unknown as ServiceWorkerGlobalScope;
 
-const CACHE_NAME = 'pyodide-v0.29.3';
+const CACHE_NAME = 'pyodide-v0.29.3-r3';
 const PYODIDE_ORIGIN = '/pyodide/';
 
 sw.addEventListener('install', () => {

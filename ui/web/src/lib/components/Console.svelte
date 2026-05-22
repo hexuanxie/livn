@@ -79,6 +79,7 @@
                 pendingCommand.set(null);
                 runCode(queued);
             } else {
+                terminal.writeln("Tip: load_demo_culture()  — built-in E/I culture, no HuggingFace download");
                 terminal.write(PROMPT);
             }
         } catch (e) {

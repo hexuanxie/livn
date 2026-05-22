@@ -51,6 +51,23 @@ function logSnapshot(msg: string) {
 
 let prevSnapshot: EnvSnapshot | null = null;
 
+function normalizeSystemData(raw: SystemData): SystemData {
+    const pop_coords: Record<string, Float64Array> = {};
+    for (const pop of raw.populations) {
+        const arr = raw.pop_coords[pop];
+        if (!arr) continue;
+        pop_coords[pop] = arr instanceof Float64Array ? arr : new Float64Array(arr as ArrayLike<number>);
+    }
+    const bb = raw.bounding_box;
+    return {
+        name: raw.name,
+        populations: [...raw.populations],
+        num_neurons: raw.num_neurons,
+        bounding_box: bb instanceof Float64Array ? bb : new Float64Array(bb as ArrayLike<number>),
+        pop_coords,
+    };
+}
+
 export function updateStores(snapshot: EnvSnapshot | null) {
     if (!snapshot) {
         logSnapshot('updateStores called with null snapshot');
@@ -60,19 +77,24 @@ export function updateStores(snapshot: EnvSnapshot | null) {
     const keys = Object.keys(snapshot);
     logSnapshot(`updateStores: keys=[${keys.join(',')}]`);
 
-    if (snapshot.system !== prevSnapshot?.system) {
-        logSnapshot(`system changed: ${snapshot.system ? snapshot.system.name + ' (' + snapshot.system.num_neurons + ' neurons)' : 'null'}`);
-        envSystem.set(snapshot.system);
-        if (snapshot.system) {
-            viewConfig.update((vc) => ({
-                ...vc,
-                popVisibility: Object.fromEntries(
-                    snapshot.system!.populations.map((p) => [p, vc.popVisibility[p] ?? true])
-                )
-            }));
-        }
-    } else {
-        logSnapshot('system unchanged');
+    if (snapshot.system) {
+        const normalized = normalizeSystemData(snapshot.system);
+        const prev = prevSnapshot?.system;
+        const changed = !prev
+            || prev.name !== normalized.name
+            || prev.num_neurons !== normalized.num_neurons;
+        logSnapshot(
+            changed
+                ? `system changed: ${normalized.name} (${normalized.num_neurons} neurons)`
+                : 'system refresh (same counts, updating viz)'
+        );
+        envSystem.set(normalized);
+        viewConfig.update((vc) => ({
+            ...vc,
+            popVisibility: Object.fromEntries(
+                normalized.populations.map((p) => [p, vc.popVisibility[p] ?? true])
+            )
+        }));
     }
     if (snapshot.io !== prevSnapshot?.io) {
         logSnapshot(`io changed: ${snapshot.io ? snapshot.io.type : 'null'}`);

@@ -1,4 +1,6 @@
 import { loadPyodide as _loadPyodide, type PyodideInterface } from 'pyodide';
+import type { CultureSpec } from './cultureGeneration';
+import { DEFAULT_CULTURE_SPEC } from './cultureGeneration';
 import type { EnvSnapshot } from './types';
 import { pyodideReady, hsdsConnected, backendInfo, loading, lastError, lastExecTime, updateStores, snapshotLog } from './stores';
 
@@ -26,17 +28,21 @@ async function _initPyodide(onLog: (msg: string) => void): Promise<void> {
 
     onLog('Loading Pyodide runtime…');
 
-    // Register service worker to cache pyodide assets across page loads
-    if ('serviceWorker' in navigator) {
+    // Cache pyodide assets in production only (dev uses Vite wheel proxy; SW can mask 502s)
+    if (import.meta.env.PROD && 'serviceWorker' in navigator) {
         navigator.serviceWorker.register('/sw.js').catch(() => { });
     }
 
     pyodide = await _loadPyodide({
-        indexURL: '/pyodide/'
+        indexURL: '/pyodide/',
+        // Load micropip during init (required before any `import micropip` in runPythonAsync)
+        packages: ['micropip'],
     });
 
-    await pyodide!.loadPackage('micropip');
-    await pyodide!.loadPackage(['scipy', 'pandas', 'pydantic']);
+    // Verify micropip is importable (loadPackage alone can fail silently via CDN/SW issues)
+    await pyodide.runPythonAsync('import micropip');
+
+    await pyodide.loadPackage(['numpy', 'scipy', 'pandas', 'pydantic-core', 'pydantic']);
 
     onLog('Installing livn…');
     const manifest = await fetch('/wheel.json').then(r => r.json());
@@ -65,8 +71,163 @@ await micropip.install('emfs:///${manifest.filename}', deps=False)
         backendInfo.set('pyfive (local)');
     }
 
+    await registerDemoCultureRuntime();
+
     pyodideReady.set(true);
     onLog('Ready');
+}
+
+/** Python helpers for built-in demo culture (console: load_demo_culture()). */
+const DEMO_CULTURE_RUNTIME_PY = `
+import numpy as _np
+
+def _mea_grid(shape, rect_x, rect_y, disk_r, pitch):
+    if pitch <= 0:
+        return []
+    xmin = 0.0 if shape == 'rectangle' else -float(disk_r)
+    xmax = float(rect_x) if shape == 'rectangle' else float(disk_r)
+    ymin = 0.0 if shape == 'rectangle' else -float(disk_r)
+    ymax = float(rect_y) if shape == 'rectangle' else float(disk_r)
+    sx = _np.ceil(xmin / pitch) * pitch
+    sy = _np.ceil(ymin / pitch) * pitch
+    coords = []
+    x = float(sx)
+    while x <= xmax + 1e-6:
+        y = float(sy)
+        while y <= ymax + 1e-6:
+            if shape != 'disk' or _np.hypot(x, y) <= float(disk_r):
+                coords.append([x, y])
+            y += float(pitch)
+        x += float(pitch)
+    return coords
+
+class _BuiltinCultureSystem:
+    def __init__(self, spec):
+        self._spec = spec
+        self.name = spec['name']
+        self.uri = 'builtin://' + spec['name']
+        rng = _np.random.default_rng(int(spec['seed']))
+        total = int(spec['total_neurons'])
+        exc_ratio = float(spec['exc_ratio'])
+        n_exc = int(round(total * exc_ratio))
+        n_inh = total - n_exc
+        self._pop_counts = {'EXC': n_exc, 'INH': n_inh}
+        z = 0.0
+
+        if spec['shape'] == 'rectangle':
+            rx, ry = float(spec['rect_x']), float(spec['rect_y'])
+            self._bbox = _np.array([[0.0, 0.0, z], [rx, ry, z]], dtype=_np.float64)
+            exc_xy = _np.column_stack([rng.uniform(0, rx, n_exc), rng.uniform(0, ry, n_exc)])
+            inh_xy = _np.column_stack([rng.uniform(0, rx, n_inh), rng.uniform(0, ry, n_inh)])
+        else:
+            dr = float(spec['disk_radius'])
+
+            def _disk_pts(n):
+                u = rng.random(n)
+                theta = rng.uniform(0, 2 * _np.pi, n)
+                r = _np.sqrt(u) * dr
+                return _np.column_stack([r * _np.cos(theta), r * _np.sin(theta)])
+
+            self._bbox = _np.array([[-dr, -dr, z], [dr, dr, z]], dtype=_np.float64)
+            exc_xy = _disk_pts(n_exc)
+            inh_xy = _disk_pts(n_inh)
+
+        self._coords = {}
+        gid = 0
+        for pop, n, xy in [('EXC', n_exc, exc_xy), ('INH', n_inh, inh_xy)]:
+            gids = _np.arange(gid, gid + n, dtype=_np.float64)
+            gid += n
+            zs = _np.full(n, z, dtype=_np.float64)
+            self._coords[pop] = _np.column_stack([gids, xy[:, 0], xy[:, 1], zs])
+
+    @property
+    def populations(self):
+        return list(self._pop_counts.keys())
+
+    @property
+    def num_neurons(self):
+        return int(sum(self._pop_counts.values()))
+
+    @property
+    def bounding_box(self):
+        return self._bbox
+
+    def coordinate_array(self, population, all=True):
+        return self._coords[population]
+
+    def default_model(self):
+        from livn.models.rcsd import ReducedCalciumSomaDendrite
+        return ReducedCalciumSomaDendrite()
+
+    def default_io(self):
+        from livn.io import MEA
+        mea = self._spec.get('mea_coords') or []
+        if not mea:
+            return MEA()
+        n = len(mea)
+        coords = _np.zeros((n, 4), dtype=_np.float64)
+        coords[:, 0] = _np.arange(n, dtype=_np.float64)
+        for i, pt in enumerate(mea):
+            coords[i, 1] = float(pt[0])
+            coords[i, 2] = float(pt[1])
+            coords[i, 3] = 0.0
+        return MEA(electrode_coordinates=coords, input_radius=50, output_radius=80)
+
+def load_demo_culture(
+    seed=42,
+    total_neurons=10000,
+    exc_ratio=0.8,
+    rect_x=4000.0,
+    rect_y=4000.0,
+    mea_pitch=200.0,
+    shape='rectangle',
+    disk_radius=2000.0,
+    name='demo_culture',
+):
+    """Load the built-in 2D E/I demo culture into global env (no HuggingFace)."""
+    global env
+    spec = {
+        'name': name,
+        'seed': int(seed),
+        'total_neurons': int(total_neurons),
+        'exc_ratio': float(exc_ratio),
+        'rect_x': float(rect_x),
+        'rect_y': float(rect_y),
+        'mea_pitch': float(mea_pitch),
+        'shape': shape,
+        'disk_radius': float(disk_radius),
+        'mea_coords': _mea_grid(shape, rect_x, rect_y, disk_radius, mea_pitch),
+    }
+    _system = _BuiltinCultureSystem(spec)
+    from livn.env import Env
+    env = Env(_system)
+    print(
+        f"Demo culture ready: {env.system.num_neurons} neurons, "
+        f"{env.io.num_channels} electrodes — try env.system, env.io, env.run(...)"
+    )
+    return env
+`;
+
+async function registerDemoCultureRuntime(): Promise<void> {
+    await pyodide!.runPythonAsync(DEMO_CULTURE_RUNTIME_PY);
+}
+
+/** Console code to load the demo culture (same path as clicking Demo Culture on System tab). */
+export function builtinCultureSetupCode(spec: CultureSpec = DEFAULT_CULTURE_SPEC): string {
+    const shape = spec.shape === 'disk' ? 'disk' : 'rectangle';
+    return [
+        '# Demo culture (in-browser, no HuggingFace)',
+        'env = load_demo_culture(',
+        `    seed=${spec.seed},`,
+        `    total_neurons=${spec.totalNeurons},`,
+        `    exc_ratio=${spec.excRatio},`,
+        `    rect_x=${spec.rectX},`,
+        `    rect_y=${spec.rectY},`,
+        `    mea_pitch=${spec.meaPitch},`,
+        `    shape='${shape}',`,
+        `    disk_radius=${spec.diskRadius},`,
+        ')',
+    ].join('\n');
 }
 
 async function tryConfigureHSDS(): Promise<boolean> {
@@ -332,6 +493,12 @@ export type RowData = {
     spikes: Record<number, number[]>;
     voltages: Record<number, number[]>;
 };
+
+/** Generate a culture in-browser (SystemGenerator defaults, no HuggingFace). */
+export async function loadBuiltinCulture(spec: CultureSpec = DEFAULT_CULTURE_SPEC): Promise<void> {
+    await initPyodide(() => {});
+    await executeCode(builtinCultureSetupCode(spec));
+}
 
 export async function loadExpSystem(sysName: string): Promise<void> {
     if (!pyodide) throw new Error('Pyodide not initialized');

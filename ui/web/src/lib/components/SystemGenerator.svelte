@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { computeMEA } from '$lib/cultureGeneration';
 
     // ── Preset MEA: 512-electrode lab chip (512_long_mea_6x_V2) ───────────────
     // Positions are [x, y] in µm, extracted from the lab's YAML file.
@@ -123,32 +124,20 @@
         excRatio = Math.max(0.01, Math.min(0.99, excCount / newTotal));
     }
 
-    function computeMEA(
-        sh: string,
-        rx: number, ry: number, dr: number,
-        pitch: number
-    ): [number, number][] {
-        if (pitch <= 0) return [];
-        const coords: [number, number][] = [];
-        const xmin = sh === 'rectangle' ? 0 : -dr;
-        const xmax = sh === 'rectangle' ? rx : dr;
-        const ymin = sh === 'rectangle' ? 0 : -dr;
-        const ymax = sh === 'rectangle' ? ry : dr;
-        const sx = Math.ceil(xmin / pitch) * pitch;
-        const sy = Math.ceil(ymin / pitch) * pitch;
-        for (let x = sx; x <= xmax + 1e-6; x += pitch) {
-            for (let y = sy; y <= ymax + 1e-6; y += pitch) {
-                if (sh === 'disk' && Math.hypot(x, y) > dr) continue;
-                coords.push([x, y]);
-            }
-        }
-        return coords;
-    }
-
     const meaCoords = $derived(
         meaMode === 'preset'
             ? PRESET_MEA_COORDS
-            : computeMEA(shape, rectX, rectY, diskRadius, meaPitch)
+            : computeMEA({
+                  name,
+                  shape,
+                  rectX,
+                  rectY,
+                  diskRadius,
+                  totalNeurons,
+                  excRatio,
+                  meaPitch,
+                  seed: 42,
+              })
     );
     const meaCount  = $derived(meaCoords.length);
 
