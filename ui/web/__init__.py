@@ -8,12 +8,15 @@ from pydantic import BaseModel
 
 _WEB_DIR = os.path.dirname(__file__)
 _REPO_ROOT = os.path.dirname(os.path.dirname(_WEB_DIR))
+_BUILD_DIR = os.path.join(_WEB_DIR, "build")
+_DEFAULT_PUBLISH_DIR = os.path.join(_REPO_ROOT, "dist", "livn-ui")
 
 
 class Web(Interface):
     class Config(BaseModel):
         host: str = "localhost"
         port: int = 5173
+        output_dir: str | None = None
 
     def launch(self):
         self.build_wheel()
@@ -53,10 +56,39 @@ class Web(Interface):
 
         print(f"Wheel copied to {target}")
 
-    def dev(self):
-        # Install npm deps if needed
+    def _ensure_npm_deps(self) -> None:
         if not os.path.isdir(os.path.join(_WEB_DIR, "node_modules")):
             subprocess.run(["npm", "install"], cwd=_WEB_DIR, check=True)
+
+    def publish(self) -> str:
+        """Build the frontend as a static site for deployment to a web server."""
+        self.build_wheel()
+        self._ensure_npm_deps()
+
+        print("Building static frontend…")
+        subprocess.run(["npm", "run", "build"], cwd=_WEB_DIR, check=True)
+
+        if not os.path.isdir(_BUILD_DIR):
+            raise RuntimeError(f"Vite build did not produce {_BUILD_DIR}")
+
+        dest = os.path.abspath(self.config.output_dir or _DEFAULT_PUBLISH_DIR)
+        if os.path.exists(dest):
+            shutil.rmtree(dest)
+        shutil.copytree(_BUILD_DIR, dest)
+
+        print(f"Static site published to {dest}")
+        print(
+            "Upload this directory to any static web host "
+            "(nginx, Apache, S3, GitHub Pages, etc.)."
+        )
+        print(
+            "API features (/experiments, /bio-api, /hsds) need the livn UI server "
+            "or a compatible backend in front of the static files."
+        )
+        return dest
+
+    def dev(self):
+        self._ensure_npm_deps()
 
         # Start Vite dev server
         subprocess.run(

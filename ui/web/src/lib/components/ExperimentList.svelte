@@ -22,9 +22,19 @@
 
     $effect(() => {
         fetch(`${FILE_SERVER}/experiments`)
-            .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-            .then(data => { experiments = data; fetching = false; })
-            .catch(e  => { fetchError = e.message; fetching = false; });
+            .then(r => {
+                if (r.status === 404) {
+                    experiments = [];
+                    return;
+                }
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (data) experiments = data;
+                fetching = false;
+            })
+            .catch(e => { fetchError = e.message; fetching = false; });
     });
 
     // Group by root, excluding built-ins (shown separately)

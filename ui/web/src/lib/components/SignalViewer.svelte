@@ -58,23 +58,19 @@
         loading = true;
         error   = null;
 
-        const qs = new URLSearchParams({
-            rec,
-            offset_s:   timeOffset.toString(),
-            dur_s:      WIN_DUR.toString(),
-            downsample: DOWNSAMPLE.toString(),
-            ch_start:   chOffset.toString(),
-            ch_end:     (chOffset + VISIBLE_CH).toString(),
-        });
-
         try {
-            const resp = await fetch(`/bio-api/chunk?${qs}`);
-            if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-
-            const buf = await resp.arrayBuffer();
-            data     = new Float32Array(buf);
-            nSamples = parseInt(resp.headers.get('X-N-Samples') ?? '0');
-            effHz    = parseInt(resp.headers.get('X-Sample-Rate') ?? '300');
+            const { fetchBioChunk } = await import('$lib/demoBioChunk');
+            const chunk = await fetchBioChunk({
+                rec,
+                offsetS: timeOffset,
+                durS: WIN_DUR,
+                downsample: DOWNSAMPLE,
+                chStart: chOffset,
+                chEnd: chOffset + VISIBLE_CH,
+            });
+            data     = chunk.data;
+            nSamples = chunk.nSamples;
+            effHz    = chunk.effHz;
             draw();
         } catch (e) {
             error = String(e);

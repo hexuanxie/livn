@@ -727,28 +727,25 @@ async function fetchBioElectrodeData(
     timeCursorMs: number,
     state: AcquiredBioState
 ): Promise<ElectrodeData> {
+    const { fetchBioChunk } = await import('./demoBioChunk');
     const maxOffsetS = Math.max(0, state.durationMs / 1000 - BIO_WIN_DUR_S);
     const offsetS = Math.min(
         Math.max(0, timeCursorMs / 1000 - BIO_WIN_DUR_S / 2),
         maxOffsetS
     );
     const ch = Math.min(Math.max(0, electrodeId), Math.max(0, state.channels - 1));
-    const qs = new URLSearchParams({
+    const { data } = await fetchBioChunk({
         rec: state.apiPath,
-        offset_s: offsetS.toString(),
-        dur_s: BIO_WIN_DUR_S.toString(),
-        downsample: BIO_DOWNSAMPLE.toString(),
-        ch_start: ch.toString(),
-        ch_end: (ch + 1).toString(),
+        offsetS,
+        durS: BIO_WIN_DUR_S,
+        downsample: BIO_DOWNSAMPLE,
+        chStart: ch,
+        chEnd: ch + 1,
     });
-    const resp = await fetch(`/bio-api/chunk?${qs}`);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
-    const buf = await resp.arrayBuffer();
-    const samples = new Float32Array(buf);
     return {
         duration: state.durationMs,
-        hasLfp: samples.length > 0,
-        lfp: Array.from(samples),
+        hasLfp: data.length > 0,
+        lfp: Array.from(data),
         spikeTimes: [],
     };
 }
